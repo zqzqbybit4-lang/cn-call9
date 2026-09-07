@@ -55,7 +55,6 @@ class CNCallConnection(
     }
 
     init {
-        setAudioModeIsVoip(true)
         setAddress(address, CallLog.Calls.PRESENTATION_ALLOWED)
         if (callerName.isNotBlank()) {
             setCallerDisplayName(callerName, CallLog.Calls.PRESENTATION_ALLOWED)

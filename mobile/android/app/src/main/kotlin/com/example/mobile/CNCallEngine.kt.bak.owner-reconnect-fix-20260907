@@ -728,7 +728,6 @@ object CNCallEngine {
          */
         private fun releaseNativeOwnershipIfOwned() {
             val context = appContext ?: return
-            NativeWebSocketClient.disconnect()
             NativeWebSocketClient.releaseNativeOwnership(context)
             println("[CN CALL][ENGINE] released native WS ownership")
         }
