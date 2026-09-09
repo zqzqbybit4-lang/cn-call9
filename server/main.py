@@ -803,7 +803,7 @@ def send_call_notification(
     caller_name: str,
     call_id: str,
     message_type: str = "incoming_call",
-):
+) -> bool:
     token = FCM_TOKENS.get(target_id)
 
     print("FCM TARGET:", target_id)
@@ -822,10 +822,18 @@ def send_call_notification(
             FCM_TOKENS[target_id] = token
 
     if not token:
-        return
+        print(
+            "[CN CALL][FCM FAILED] "
+            f"call_id={call_id} target={target_id} reason=no_token"
+        )
+        return False
 
     if not firebase_admin._apps:
-        return
+        print(
+            "[CN CALL][FCM FAILED] "
+            f"call_id={call_id} target={target_id} reason=firebase_unavailable"
+        )
+        return False
 
     try:
         message = messaging.Message(
@@ -846,9 +854,15 @@ def send_call_notification(
 
         response = messaging.send(message)
         print('FCM SENT:', response)
+        return True
 
     except Exception as e:
         print(f"FCM send error: {e}")
+        print(
+            "[CN CALL][FCM FAILED] "
+            f"call_id={call_id} target={target_id} error={e}"
+        )
+        return False
 
 
 # ============================================================
@@ -1030,8 +1044,6 @@ async def websocket_endpoint(
                     (call_id,),
                 ).fetchone()
                 db.close()
-                target_online = target_id in connections
-
                 if existing is not None:
                     await websocket.send_json({
                         "type": "call_reject",
@@ -1133,6 +1145,9 @@ async def websocket_endpoint(
                 _mark_active_user(user_id, call_id, "caller")
                 _mark_active_user(target_id, call_id, "callee")
 
+                target_socket = connections.get(target_id)
+                target_online = target_socket is not None
+
                 await websocket.send_json({
                     "type": "call_started",
                     "call_id": call_id,
@@ -1142,21 +1157,48 @@ async def websocket_endpoint(
                     "target_online": target_online,
                 })
 
-                if target_online:
-                    await connections[target_id].send_json({
-                        **message,
-                        "call_id": call_id,
-                        "ring_expires_at": ring_expires_at,
-                        "from_id": user_id,
-                    })
-                else:
-                    send_call_notification(
+                print(
+                    "[CN CALL][CALL INITIAL WS ATTEMPT] "
+                    f"call_id={call_id} target={target_id} "
+                    f"socket_present={target_socket is not None}"
+                )
+                delivered = False
+                if target_socket is not None:
+                    try:
+                        await target_socket.send_json({
+                            **message,
+                            "call_id": call_id,
+                            "ring_expires_at": ring_expires_at,
+                            "from_id": user_id,
+                        })
+                        delivered = True
+                        print(
+                            "[CN CALL][CALL INITIAL WS SENT] "
+                            f"call_id={call_id} target={target_id}"
+                        )
+                    except Exception as exc:
+                        print(
+                            "[CN CALL][CALL INITIAL WS FAILED] "
+                            f"call_id={call_id} target={target_id} error={exc}"
+                        )
+
+                if not delivered:
+                    print(
+                        "[CN CALL][CALL INITIAL FCM FALLBACK] "
+                        f"call_id={call_id} target={target_id}"
+                    )
+                    fcm_sent = send_call_notification(
                         target_id=target_id,
                         caller_id=user_id,
                         caller_name=str(
                             message.get("caller_name", "مستخدم CN CALL")
                         ),
                         call_id=call_id,
+                    )
+                    print(
+                        "[CN CALL][CALL INITIAL FCM "
+                        f"{'SENT' if fcm_sent else 'FAILED'}] "
+                        f"call_id={call_id} target={target_id}"
                     )
                 continue
 

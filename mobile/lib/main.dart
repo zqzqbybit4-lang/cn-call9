@@ -34,8 +34,11 @@ void _installTelecomEventHandler() {
     // Rendering and all call decisions remain in Flutter; it must never create
     // a Telecom/InCallUI call.
     if (call.method == 'incomingCall') {
-      await CallSession.instance.incomingCallFromNotification(
-        Map<String, dynamic>.from(arguments),
+      // Native Telecom owns this call. Do not turn the same event into a
+      // pending Flutter incoming screen.
+      print(
+        'Telecom incoming event ignored by legacy Flutter UI '
+        'call_id=${arguments['callId']}',
       );
       return;
     }
@@ -170,8 +173,6 @@ Future<void> main() async {
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  await FirebaseMessagingService.instance.initialize();
-
   _installTelecomEventHandler();
 
   RtcCallManager.instance.startListening();
@@ -277,12 +278,17 @@ class _LoginScreenState extends State<LoginScreen>
   bool _hasReadPhoneNumbers = false;
   bool _phoneAccountEnabled = false;
   bool _setupCheckInProgress = false;
+  bool _startupPermissionFlowStarted = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _verifySetup();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _startupPermissionFlowStarted) return;
+      _startupPermissionFlowStarted = true;
+      _runStartupPermissionFlow();
+    });
   }
 
   @override
@@ -308,10 +314,8 @@ class _LoginScreenState extends State<LoginScreen>
     var hasPermission = true;
     try {
       hasPermission =
-          await _telecomChannel.invokeMethod<bool>(
-                'hasReadPhoneNumbersPermission',
-              ) ??
-              false;
+          await _telecomChannel.invokeMethod<bool>('hasStartupPermissions') ??
+          false;
     } on PlatformException {
       hasPermission = false;
     }
@@ -355,25 +359,30 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
+  Future<void> _runStartupPermissionFlow() async {
+    await FirebaseMessagingService.instance.initialize();
+    try {
+      await _telecomChannel.invokeMethod<bool>('requestStartupPermissions');
+    } on PlatformException {
+      // _verifySetup reports the incomplete permission state and setup can retry.
+    }
+    if (mounted) {
+      await _verifySetup();
+    }
+  }
+
   Future<void> _runSetup() async {
     var hasPermission = false;
     try {
       hasPermission =
-          await _telecomChannel.invokeMethod<bool>(
-                'hasReadPhoneNumbersPermission',
-              ) ??
-              false;
+          await _telecomChannel.invokeMethod<bool>('hasStartupPermissions') ??
+          false;
     } on PlatformException {
       hasPermission = false;
     }
 
     if (!hasPermission) {
-      _message('فعّل صلاحية أرقام الهاتف من إعدادات تطبيق CN CALL ثم عد للتطبيق');
-      try {
-        await _telecomChannel.invokeMethod<bool>('openAppSettings');
-      } on PlatformException {
-        // Opening settings is best-effort; the resume re-check still runs.
-      }
+      _message('أكمل أذونات البداية أولًا: الميكروفون وأرقام الهاتف');
       return;
     }
 
@@ -405,6 +414,32 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     await _verifySetup();
+  }
+
+  Future<void> _configurePhoneAccount() async {
+    try {
+      await _telecomChannel.invokeMethod<bool>('registerCNCallPhoneAccount');
+      final enabled =
+          await _telecomChannel.invokeMethod<bool>(
+                'isCNCallPhoneAccountEnabled',
+              ) ??
+              false;
+
+      if (!mounted) return;
+      setState(() {
+        _phoneAccountEnabled = enabled;
+      });
+
+      if (!enabled) {
+        _message('فعّل حساب CN CALL من إعدادات المكالمات ثم عد للتطبيق');
+        await _telecomChannel.invokeMethod<bool>('openTelecomCallSettings');
+      } else {
+        _message('حساب CN CALL مفعّل', success: true);
+      }
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      _message('تعذر إعداد Phone Account: ${error.message ?? error.code}');
+    }
   }
 
   void openRegister() {
@@ -656,6 +691,46 @@ class _LoginScreenState extends State<LoginScreen>
 
                     const SizedBox(height: 14),
 
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: OutlinedButton.icon(
+                        onPressed: _setupState == CnSetupState.checking
+                            ? null
+                            : _configurePhoneAccount,
+                        icon: Icon(
+                          _phoneAccountEnabled
+                              ? Icons.check_circle_outline
+                              : Icons.phone_in_talk_outlined,
+                          size: 19,
+                        ),
+                        label: Text(
+                          _phoneAccountEnabled
+                              ? 'Phone Account مفعّل'
+                              : 'إعداد Phone Account',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _phoneAccountEnabled
+                              ? const Color(0xFF00E676)
+                              : Colors.white70,
+                          side: BorderSide(
+                            color: _phoneAccountEnabled
+                                ? const Color(0xFF00A85A)
+                                : Colors.grey.shade800,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 14),
+
                     _PrimaryButton(text: 'تسجيل الدخول', onPressed: login),
 
                     const SizedBox(height: 12),
@@ -810,17 +885,6 @@ class _HomeScreenState extends State<HomeScreen>
       if (_incomingCallScreenCallId != callId) return;
       _closeIncomingCallScreen();
     };
-
-    // المكالمات التي وصلت عبر FCM أثناء إغلاق التطبيق.
-    CallSession.instance.incomingCalls.listen(showIncomingCall);
-
-    Future.microtask(() async {
-      final pendingCall =
-          await CallSession.instance.takePendingIncomingCall();
-      if (mounted && pendingCall != null) {
-        await showIncomingCall(pendingCall);
-      }
-    });
 
     rtcManager.onDisconnected = () {
       _closeIncomingCallScreen();
@@ -1133,6 +1197,9 @@ class _HomeScreenState extends State<HomeScreen>
 
       final callId = const Uuid().v4();
 
+      final manager = RtcCallManager.instance;
+      await manager.prepareNativeOutgoingCall(callId);
+
       bool started = false;
       var permissionDenied = false;
       try {
@@ -1160,6 +1227,7 @@ class _HomeScreenState extends State<HomeScreen>
       );
 
       if (!started) {
+        await manager.abortNativeOutgoingCall(callId);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1192,12 +1260,8 @@ class _HomeScreenState extends State<HomeScreen>
       // placeCNCall extras. The CallScreen then mirrors the native connection
       // (active/ended events) and ends it through Telecom — no second Uuid,
       // no Flutter WebSocket, no separate signaling for this callId.
-      final manager = RtcCallManager.instance;
-      manager.currentCallId = callId;
       manager.remoteUserId = id;
-      manager.caller = true;
-      manager.inCall = false;
-      manager.state = CallState.ringing;
+      await manager.startOutgoingRingback(callId);
 
       Navigator.push(
         context,

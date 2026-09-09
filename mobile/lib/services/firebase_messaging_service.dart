@@ -28,22 +28,9 @@ Future<void> firebaseMessagingBackgroundHandler(
       return;
     }
 
-    final callerId =
-        message.data['caller_id']?.toString() ??
-        message.data['from_id']?.toString() ??
-        '';
-
-    if (callerId.isEmpty) {
-      print('FCM BACKGROUND: missing caller_id');
-      return;
-    }
-
-    await CallSession.instance.incomingCallFromNotification(message.data);
-
-    // A background isolate cannot render UI. Persisting this exact payload
-    // lets the foreground Flutter activity consume it on launch/resume.
-    print('FCM BACKGROUND: incoming call persisted for CN CALL UI');
-
+    // Native CallFirebaseService owns incoming_call delivery through Telecom.
+    // Do not persist a second Flutter pending call for the same call_id.
+    print('FCM BACKGROUND: incoming_call owned by native Telecom call_id=$callId');
     return;
   }
 
@@ -133,20 +120,15 @@ class FirebaseMessagingService {
             return;
           }
 
-          final callerId =
-              message.data['caller_id']?.toString() ??
-              message.data['from_id']?.toString() ??
-              '';
-
-          if (callerId.isEmpty) return;
-
           final callId = message.data['call_id']?.toString();
           if (callId == null || callId.isEmpty) return;
 
           if (await CallSession.instance.isCallEnded(callId)) return;
           if (await CallSession.instance.hasActiveCall()) return;
-          await CallSession.instance.incomingCallFromNotification(message.data);
-          print('FCM FOREGROUND: delivered to CN CALL incoming UI');
+          // Native CallFirebaseService owns incoming_call delivery through
+          // Telecom. Keeping this out of pending_incoming_call prevents the
+          // legacy Flutter incoming screen from duplicating the Telecom call.
+          print('FCM FOREGROUND: incoming_call owned by native Telecom call_id=$callId');
         },
       );
 
