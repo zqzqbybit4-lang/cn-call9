@@ -1,10 +1,13 @@
 package com.example.mobile
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.CallLog
 import android.telecom.Connection
 import android.telecom.DisconnectCause
+import java.io.IOException
 
 class CNCallConnection(
     private val appContext: Context,
@@ -14,9 +17,15 @@ class CNCallConnection(
     private val callerName: String,
     private val address: Uri,
 ) : Connection() {
+    @Volatile
     private var terminal = false
     private var answering = false
+    @Volatile
     private var active = false
+    private val terminalLock = Any()
+    private val ringbackLock = Any()
+    private var ringbackPlayer: MediaPlayer? = null
+    private var ringbackGeneration = 0L
     internal val engineCallbacks = object : CNCallEngine.Callbacks {
         override fun onMediaReady() {
             if (terminal || active) return
@@ -31,7 +40,7 @@ class CNCallConnection(
             }
 
             if (CNCallRegistry.markOutgoingActive(callId)) {
-                active = true
+                stopOutgoingRingback(markActive = true)
                 setActive()
                 // App-originated calls keep the in-app CallScreen; the system
                 // Dialer path runs headless (Telecom in-call UI only). This
@@ -57,9 +66,10 @@ class CNCallConnection(
     init {
         setAudioModeIsVoip(true)
         setAddress(address, CallLog.Calls.PRESENTATION_ALLOWED)
-        if (callerName.isNotBlank()) {
-            setCallerDisplayName(callerName, CallLog.Calls.PRESENTATION_ALLOWED)
-        }
+        val displayName = callerName.trim()
+            .takeIf { it.isNotEmpty() && it != callerId.trim() }
+            ?: "مستخدم CN CALL"
+        setCallerDisplayName(displayName, CallLog.Calls.PRESENTATION_ALLOWED)
     }
 
     fun beginRinging() {
@@ -71,6 +81,165 @@ class CNCallConnection(
     fun beginDialing() {
         if (!terminal) {
             setDialing()
+            if (!incoming) {
+                startOutgoingRingback()
+            }
+        }
+    }
+
+    private fun startOutgoingRingback() {
+        val generation: Long
+        synchronized(ringbackLock) {
+            if (terminal || active || ringbackPlayer != null) return
+            ringbackGeneration += 1
+            generation = ringbackGeneration
+        }
+        println("[CN CALL][RINGBACK] start call_id=$callId")
+
+        val player = MediaPlayer()
+        var registered = false
+        try {
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+            )
+            appContext.assets.openFd(
+                "flutter_assets/assets/sounds/ringing.mp3",
+            ).use { asset ->
+                player.setDataSource(
+                    asset.fileDescriptor,
+                    asset.startOffset,
+                    asset.length,
+                )
+            }
+            player.isLooping = true
+            player.setOnErrorListener { _, what, extra ->
+                println(
+                    "[CN CALL][RINGBACK] failed call_id=$callId " +
+                        "what=$what extra=$extra",
+                )
+                stopOutgoingRingback()
+                true
+            }
+            player.setOnPreparedListener { preparedPlayer ->
+                var releasePlayer = false
+                var started = false
+                synchronized(ringbackLock) {
+                    if (preparedPlayer !== ringbackPlayer ||
+                        generation != ringbackGeneration ||
+                        terminal ||
+                        active
+                    ) {
+                        if (preparedPlayer === ringbackPlayer) {
+                            ringbackPlayer = null
+                            ringbackGeneration += 1
+                            releasePlayer = true
+                        }
+                    } else {
+                        try {
+                            preparedPlayer.start()
+                            started = true
+                        } catch (error: IllegalStateException) {
+                            println(
+                                "[CN CALL][RINGBACK] failed call_id=$callId error=$error",
+                            )
+                            ringbackPlayer = null
+                            ringbackGeneration += 1
+                            releasePlayer = true
+                        }
+                    }
+                }
+                if (releasePlayer) {
+                    releaseOutgoingRingbackPlayer(preparedPlayer)
+                }
+                if (started) {
+                    println("[CN CALL][RINGBACK] started call_id=$callId")
+                }
+            }
+            var releaseBeforePrepare = false
+            synchronized(ringbackLock) {
+                if (generation != ringbackGeneration || terminal || active) {
+                    releaseBeforePrepare = true
+                } else {
+                    ringbackPlayer = player
+                    registered = true
+                    player.prepareAsync()
+                }
+            }
+            if (releaseBeforePrepare) {
+                releaseOutgoingRingbackPlayer(player)
+                return
+            }
+        } catch (error: IOException) {
+            println("[CN CALL][RINGBACK] failed call_id=$callId error=$error")
+            if (registered) {
+                removeOutgoingRingbackPlayer(player, generation)
+            } else {
+                releaseOutgoingRingbackPlayer(player)
+            }
+        } catch (error: IllegalArgumentException) {
+            println("[CN CALL][RINGBACK] failed call_id=$callId error=$error")
+            if (registered) {
+                removeOutgoingRingbackPlayer(player, generation)
+            } else {
+                releaseOutgoingRingbackPlayer(player)
+            }
+        } catch (error: IllegalStateException) {
+            println("[CN CALL][RINGBACK] failed call_id=$callId error=$error")
+            if (registered) {
+                removeOutgoingRingbackPlayer(player, generation)
+            } else {
+                releaseOutgoingRingbackPlayer(player)
+            }
+        }
+    }
+
+    private fun removeOutgoingRingbackPlayer(player: MediaPlayer, generation: Long) {
+        val removed: Boolean
+        synchronized(ringbackLock) {
+            removed = if (ringbackPlayer === player && ringbackGeneration == generation) {
+                ringbackPlayer = null
+                ringbackGeneration += 1
+                true
+            } else {
+                false
+            }
+        }
+        if (removed) {
+            releaseOutgoingRingbackPlayer(player)
+        }
+    }
+
+    private fun releaseOutgoingRingbackPlayer(player: MediaPlayer) {
+        try {
+            player.release()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun stopOutgoingRingback(markActive: Boolean = false) {
+        val player: MediaPlayer?
+        synchronized(ringbackLock) {
+            ringbackGeneration += 1
+            player = ringbackPlayer
+            ringbackPlayer = null
+            if (markActive) {
+                active = true
+            }
+        }
+        if (player == null) return
+
+        println("[CN CALL][RINGBACK] stop call_id=$callId")
+        try {
+            player.stop()
+        } catch (_: Exception) {
+        } finally {
+            try {
+                player.release()
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -119,8 +288,11 @@ class CNCallConnection(
     }
 
     override fun onDisconnect() {
-        if (terminal || !CNCallRegistry.claimDisconnect(callId)) return
-        terminal = true
+        synchronized(terminalLock) {
+            if (terminal || !CNCallRegistry.claimDisconnect(callId)) return
+            terminal = true
+        }
+        stopOutgoingRingback()
         answering = false
         active = false
         CNCallRegistry.markTerminated(callId)
@@ -147,11 +319,30 @@ class CNCallConnection(
     }
 
     fun fail(code: Int) {
-        if (terminal) return
-        terminal = true
+        synchronized(terminalLock) {
+            if (terminal) return
+            terminal = true
+        }
+        stopOutgoingRingback()
         answering = false
         active = false
-CNCallEngine.release(callId)
+        CNCallEngine.release(callId)
+        CNCallNotification.cancel(appContext, callId)
+        setDisconnected(DisconnectCause(code))
+        MainActivity.postTelecomEvent("ended", mapOf("callId" to callId))
+        destroyAndRemove()
+    }
+
+    fun terminateFromRemote(code: Int) {
+        synchronized(terminalLock) {
+            if (terminal || !CNCallRegistry.claimDisconnect(callId)) return
+            terminal = true
+        }
+        stopOutgoingRingback()
+        answering = false
+        active = false
+        CNCallRegistry.markTerminated(callId)
+        CNCallEngine.release(callId)
         CNCallNotification.cancel(appContext, callId)
         setDisconnected(DisconnectCause(code))
         MainActivity.postTelecomEvent("ended", mapOf("callId" to callId))

@@ -420,16 +420,20 @@ object CNCallEngine {
 
             if (!ensureSignalingConnected()) return false
 
-            // Verified: server/main.py "call" (lines 947-1093). caller_name is
-            // omitted here because NativeCallTokenHelper does not expose the
-            // display name; server/main.py (line 1044) falls back to its
-            // default "مستخدم CN CALL" when absent.
+            val callerName = context
+                .getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                .getString("flutter.cn_call_display_name", null)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: "مستخدم CN CALL"
+
             val sent = NativeWebSocketClient.send(
                 "call",
                 mapOf(
                     "call_id" to callId,
                     "target_id" to targetId,
                     "from_id" to ownUserId,
+                    "caller_name" to callerName,
                 ),
             )
             return sent
@@ -853,7 +857,10 @@ object CNCallEngine {
                     val callerId =
                         (payload["from_id"] ?: payload["caller_id"]).orEmpty()
                     val callerName =
-                        (payload["caller_name"] ?: callerId).orEmpty()
+                        payload["caller_name"]
+                            ?.trim()
+                            ?.takeIf { it.isNotEmpty() }
+                            ?: "مستخدم CN CALL"
                     val context = appContext
                     val ownerIsNative =
                         context != null &&

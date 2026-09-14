@@ -1,5 +1,6 @@
 // ignore_for_file: avoid_print
 
+import 'dart:developer' as developer;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
@@ -62,6 +63,9 @@ class RtcCallManager {
   Future<void>? _cleanupFuture;
   bool _ringbackPlaying = false;
   bool _incomingRingtonePlaying = false;
+  String? _nativeOutgoingRingbackCallId;
+  int _nativeOutgoingRingbackGeneration = 0;
+  bool _nativeOutgoingCallActive = false;
   Completer<bool>? _callStartCompleter;
   int? _callStartExpiresAt;
 
@@ -118,6 +122,53 @@ class RtcCallManager {
         '[CN CALL][RINGBACK FAILED] call_id=$callId error=$e',
       );
     }
+  }
+
+  Future<void> startOutgoingRingback(String callId) async {
+    developer.log(
+      'callId=$callId '
+      'currentCallId=$currentCallId '
+      'caller=$caller '
+      'inCall=$inCall '
+      'active=$_nativeOutgoingCallActive '
+      'registered=$_nativeOutgoingRingbackCallId '
+      'generation=$_nativeOutgoingRingbackGeneration',
+      name: 'CNCall.ringback',
+    );
+    final generation = _nativeOutgoingRingbackGeneration;
+    if (!caller ||
+        currentCallId != callId ||
+        _nativeOutgoingRingbackCallId != callId ||
+        generation != _nativeOutgoingRingbackGeneration ||
+        _nativeOutgoingCallActive ||
+        inCall) {
+      return;
+    }
+
+    await _startRinging(callId: callId);
+  }
+
+  Future<void> prepareNativeOutgoingCall(String callId) async {
+    _nativeOutgoingRingbackCallId = callId;
+    _nativeOutgoingRingbackGeneration++;
+    _nativeOutgoingCallActive = false;
+    currentCallId = callId;
+    caller = true;
+    inCall = false;
+    state = CallState.ringing;
+  }
+
+  Future<void> abortNativeOutgoingCall(String callId) async {
+    _nativeOutgoingRingbackGeneration++;
+    _nativeOutgoingRingbackCallId = null;
+    _nativeOutgoingCallActive = false;
+    await _stopRinging();
+    if (currentCallId != callId) return;
+    currentCallId = null;
+    remoteUserId = null;
+    caller = false;
+    inCall = false;
+    state = null;
   }
 
   Future<void> _stopRinging() async {
@@ -544,6 +595,10 @@ class RtcCallManager {
   Future<void> onNativeCallActive() async {
     final callId = currentCallId;
     if (callId == null || callId.isEmpty) return;
+    _nativeOutgoingRingbackGeneration++;
+    _nativeOutgoingRingbackCallId = null;
+    _nativeOutgoingCallActive = true;
+    await _stopRinging();
     _cancelCallTimeouts();
     inCall = true;
     state = CallState.connected;
@@ -606,6 +661,9 @@ class RtcCallManager {
       _callStartCompleter = null;
       _callStartExpiresAt = null;
       _cancelCallTimeouts();
+      _nativeOutgoingRingbackGeneration++;
+      _nativeOutgoingRingbackCallId = null;
+      _nativeOutgoingCallActive = false;
       await _stopRinging();
 
       if (sendSignal && callId != null && target != null && session.loggedIn) {

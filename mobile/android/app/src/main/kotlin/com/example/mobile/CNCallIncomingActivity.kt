@@ -39,11 +39,6 @@ class CNCallIncomingActivity : FlutterActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 9200)
-        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(terminalReceiver, IntentFilter(ACTION_TERMINAL), Context.RECEIVER_NOT_EXPORTED)
         } else {

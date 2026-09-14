@@ -30,6 +30,9 @@ class MainActivity : FlutterActivity() {
     private var pendingCallId: String? = null
     private var pendingTargetId: String? = null
     private var pendingCallResult: MethodChannel.Result? = null
+    private var pendingStartupPermissionResult: MethodChannel.Result? = null
+    private var startupPermissions = emptyList<String>()
+    private var startupPermissionIndex = 0
     companion object {
         const val ACTION_INCOMING_CALL = "com.example.mobile.action.INCOMING_CALL"
         private const val EVENTS_CHANNEL = "cn_call/telecom_events"
@@ -69,12 +72,6 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
-                PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 9100)
-        }
         persistIncomingIntent(intent)
     }
 
@@ -209,6 +206,41 @@ class MainActivity : FlutterActivity() {
                                 ) == PackageManager.PERMISSION_GRANTED,
                         )
                     }
+                    "hasStartupPermissions" -> {
+                        result.success(hasStartupPermissions())
+                    }
+                    "requestStartupPermissions" -> {
+                        if (pendingStartupPermissionResult != null) {
+                            result.error(
+                                "request_in_progress",
+                                "A startup permission request is already pending",
+                                null,
+                            )
+                            return@setMethodCallHandler
+                        }
+                        val permissions = buildList {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                                checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+                                    PackageManager.PERMISSION_GRANTED
+                            ) {
+                                add(android.Manifest.permission.RECORD_AUDIO)
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                                checkSelfPermission(android.Manifest.permission.READ_PHONE_NUMBERS) !=
+                                    PackageManager.PERMISSION_GRANTED
+                            ) {
+                                add(android.Manifest.permission.READ_PHONE_NUMBERS)
+                            }
+                        }
+                        if (permissions.isEmpty()) {
+                            result.success(true)
+                        } else {
+                            pendingStartupPermissionResult = result
+                            startupPermissions = permissions
+                            startupPermissionIndex = 0
+                            requestNextStartupPermission()
+                        }
+                    }
                     "openAppSettings" -> {
                         try {
                             startActivity(
@@ -307,6 +339,31 @@ class MainActivity : FlutterActivity() {
                 PackageManager.PERMISSION_GRANTED
     }
 
+    private fun hasStartupPermissions(): Boolean {
+        val hasAudio = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+        val hasPhoneNumbers = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            checkSelfPermission(android.Manifest.permission.READ_PHONE_NUMBERS) ==
+                PackageManager.PERMISSION_GRANTED
+        return hasAudio && hasPhoneNumbers
+    }
+
+    private fun requestNextStartupPermission() {
+        if (startupPermissionIndex >= startupPermissions.size) {
+            val result = pendingStartupPermissionResult
+            pendingStartupPermissionResult = null
+            startupPermissions = emptyList()
+            startupPermissionIndex = 0
+            result?.success(hasStartupPermissions())
+            return
+        }
+        requestPermissions(
+            arrayOf(startupPermissions[startupPermissionIndex]),
+            9100,
+        )
+    }
+
     private fun placeCNCallWithTelecom(
         callId: String,
         targetId: String,
@@ -350,6 +407,11 @@ class MainActivity : FlutterActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 9100) {
+            startupPermissionIndex += 1
+            requestNextStartupPermission()
+            return
+        }
         if (requestCode != REQUEST_CALL_PHONE) return
 
         val callId = pendingCallId

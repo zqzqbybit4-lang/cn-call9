@@ -3,17 +3,12 @@ package com.example.mobile
 import org.json.JSONArray
 import org.json.JSONObject
 import android.os.Bundle
+import android.telecom.DisconnectCause
 import android.telecom.TelecomManager
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 class CallFirebaseService : FirebaseMessagingService() {
-
-    private val serviceScope =
-        CoroutineScope(Dispatchers.Default)
 
     override fun onMessageReceived(message: RemoteMessage) {
 
@@ -33,21 +28,40 @@ class CallFirebaseService : FirebaseMessagingService() {
 
             if (callId.isEmpty()) return
 
-            serviceScope.launch {
-                  try {
-                      markCallEnded(callId)
-                      println(
-                          "[CN CALL][FCM] " +
-                              "FCM TERMINAL HANDLED " +
-                              "type=$type call_id=$callId"
-                      )
-
-                  } catch (error: Throwable) {
-                      println("[CN CALL][FCM] terminal persistence failed call_id=$callId error=$error")
-                  }
-              }
-
-return
+            try {
+                markCallEnded(callId)
+            } catch (error: Exception) {
+                println(
+                    "[CN CALL][FCM] terminal persistence failed " +
+                        "call_id=$callId error=$error",
+                )
+            }
+            try {
+                val connection = CNCallRegistry.get(callId)
+                    ?.connection as? CNCallConnection
+                if (connection != null) {
+                    connection.terminateFromRemote(
+                        when (type) {
+                            "call_reject" -> DisconnectCause.REJECTED
+                            "call_cancelled", "hangup", "disconnected" ->
+                                DisconnectCause.REMOTE
+                            "timeout" -> DisconnectCause.CANCELED
+                            else -> DisconnectCause.REMOTE
+                        },
+                    )
+                }
+                println(
+                    "[CN CALL][FCM] " +
+                        "FCM TERMINAL HANDLED " +
+                        "type=$type call_id=$callId",
+                )
+            } catch (error: Exception) {
+                println(
+                    "[CN CALL][FCM] terminal handling failed " +
+                        "call_id=$callId error=$error",
+                )
+            }
+            return
         }
 
         if (type != "incoming_call") {
@@ -179,7 +193,9 @@ return
             editor.remove("flutter.cn_call_active_call_id")
             editor.remove("flutter.cn_call_active_call_at")
         }
-        editor.apply()
+        if (!editor.commit()) {
+            throw IllegalStateException("terminal tombstone commit failed")
+        }
     }
 
     private fun endedCallIds(prefs: android.content.SharedPreferences): List<String> {
