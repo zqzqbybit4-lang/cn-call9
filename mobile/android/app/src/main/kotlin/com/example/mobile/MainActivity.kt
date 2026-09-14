@@ -261,10 +261,10 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                     "openTelecomCallSettings" -> {
-                        // Shows the system "Calling accounts" screen where the
-                        // user toggles the CN CALL PhoneAccount on/off.
-                        val target = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            Intent(TelecomManager.ACTION_SHOW_CALL_SETTINGS)
+                        // Shows the system "Calling accounts / Phone accounts" preference screen
+                        // where the user toggles the CN CALL PhoneAccount on/off.
+                        val target = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            Intent(TelecomManager.ACTION_CHANGE_PHONE_ACCOUNTS)
                         } else {
                             Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
                         }
@@ -272,7 +272,12 @@ class MainActivity : FlutterActivity() {
                             startActivity(target)
                             result.success(true)
                         } catch (_: ActivityNotFoundException) {
-                            result.success(false)
+                            try {
+                                startActivity(Intent(TelecomManager.ACTION_SHOW_CALL_SETTINGS))
+                                result.success(true)
+                            } catch (_: ActivityNotFoundException) {
+                                result.success(false)
+                            }
                         }
                     }
                     "canUseFullScreenIntent" -> {

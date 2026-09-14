@@ -279,6 +279,7 @@ class _LoginScreenState extends State<LoginScreen>
   bool _phoneAccountEnabled = false;
   bool _setupCheckInProgress = false;
   bool _startupPermissionFlowStarted = false;
+  bool _hasPromptedPhoneAccount = false;
 
   @override
   void initState() {
@@ -368,52 +369,92 @@ class _LoginScreenState extends State<LoginScreen>
     }
     if (mounted) {
       await _verifySetup();
+
+      var hasPermissions = false;
+      try {
+        hasPermissions =
+            await _telecomChannel.invokeMethod<bool>('hasStartupPermissions') ??
+            false;
+      } on PlatformException {
+        hasPermissions = false;
+      }
+
+      if (hasPermissions && !_phoneAccountEnabled && !_hasPromptedPhoneAccount) {
+        _hasPromptedPhoneAccount = true;
+        _showPhoneAccountDialog();
+      }
     }
   }
 
-  Future<void> _runSetup() async {
-    var hasPermission = false;
-    try {
-      hasPermission =
-          await _telecomChannel.invokeMethod<bool>('hasStartupPermissions') ??
-          false;
-    } on PlatformException {
-      hasPermission = false;
-    }
-
-    if (!hasPermission) {
-      _message('أكمل أذونات البداية أولًا: الميكروفون وأرقام الهاتف');
-      return;
-    }
-
-    try {
-      await _telecomChannel.invokeMethod<bool>('registerCNCallPhoneAccount');
-    } on PlatformException {
-      // best-effort; enablement check below is authoritative.
-    }
-
-    var enabled = false;
-    try {
-      enabled =
-          await _telecomChannel.invokeMethod<bool>(
-                'isCNCallPhoneAccountEnabled',
-              ) ??
-              false;
-    } on PlatformException {
-      enabled = false;
-    }
-
-    if (!enabled) {
-      _message('فعّل حساب CN CALL من إعدادات المكالمات ثم عد للتطبيق');
-      try {
-        await _telecomChannel.invokeMethod<bool>('openTelecomCallSettings');
-      } on PlatformException {
-        // Opening settings is best-effort; the resume re-check still runs.
-      }
-      return;
-    }
-
-    await _verifySetup();
+  void _showPhoneAccountDialog() {
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: Colors.grey.shade800),
+          ),
+          title: const Row(
+            children: [
+              Icon(
+                Icons.phone_in_talk_outlined,
+                color: Color(0xFF00E676),
+                size: 24,
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'تفعيل حساب CN CALL للمكالمات',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: const Text(
+            'يلزم تفعيل "حساب المكالمات" لـ CN CALL من إعدادات النظام لضمان استقبال وإجراء المكالمات عبر واجهة الهاتف الرسمية.',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
+              height: 1.4,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text(
+                'لاحقًا',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _configurePhoneAccount();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00A85A),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'تفعيل الحساب',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _configurePhoneAccount() async {
@@ -451,7 +492,7 @@ class _LoginScreenState extends State<LoginScreen>
 
   Future<void> login() async {
     if (_setupState != CnSetupState.ready) {
-      _message('أكمل إعداد CN CALL أولًا عبر زر "إعداد CN CALL" ثم سجّل الدخول');
+      _message('أكمل تفعيل حساب المكالمات أولًا من الإعدادات ثم سجّل الدخول');
       return;
     }
 
@@ -534,70 +575,6 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildSetupButton() {
-    final checking = _setupState == CnSetupState.checking;
-    final ready = _setupState == CnSetupState.ready;
-
-    final Color background;
-    final Color foreground;
-    final String label;
-    final IconData icon;
-
-    if (ready) {
-      background = const Color(0xFF00A85A);
-      foreground = Colors.white;
-      icon = Icons.check_circle;
-      label = 'CN CALL جاهز ✓';
-    } else if (checking) {
-      background = Colors.grey.shade800;
-      foreground = Colors.white70;
-      icon = Icons.sync;
-      label = 'جارٍ التحقق...';
-    } else {
-      background = const Color(0xFF00E676);
-      foreground = Colors.black;
-      icon = Icons.phonelink_setup_outlined;
-      label = 'إعداد CN CALL';
-    }
-
-    return SizedBox(
-      width: double.infinity,
-      height: 54,
-      child: FilledButton(
-        onPressed: checking ? null : _runSetup,
-        style: FilledButton.styleFrom(
-          backgroundColor: background,
-          foregroundColor: foreground,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-        ),
-        child: checking
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: Colors.white70,
-                ),
-              )
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -668,68 +645,6 @@ class _LoginScreenState extends State<LoginScreen>
                     ),
 
                     const SizedBox(height: 24),
-
-                    _buildSetupButton(),
-
-                    if (_setupState == CnSetupState.unconfigured)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 10),
-                        child: Text(
-                          !_hasReadPhoneNumbers
-                              ? 'يلزم تفعيل صلاحية أرقام الهاتف من إعدادات تطبيق CN CALL'
-                              : !_phoneAccountEnabled
-                                  ? 'يلزم تفعيل حساب CN CALL من "إعدادات المكالمات" ثم العودة'
-                                  : 'أكمل إعداد CN CALL من زر "إعداد CN CALL"',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.amber.shade200,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-
-                    const SizedBox(height: 14),
-
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: OutlinedButton.icon(
-                        onPressed: _setupState == CnSetupState.checking
-                            ? null
-                            : _configurePhoneAccount,
-                        icon: Icon(
-                          _phoneAccountEnabled
-                              ? Icons.check_circle_outline
-                              : Icons.phone_in_talk_outlined,
-                          size: 19,
-                        ),
-                        label: Text(
-                          _phoneAccountEnabled
-                              ? 'Phone Account مفعّل'
-                              : 'إعداد Phone Account',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: _phoneAccountEnabled
-                              ? const Color(0xFF00E676)
-                              : Colors.white70,
-                          side: BorderSide(
-                            color: _phoneAccountEnabled
-                                ? const Color(0xFF00A85A)
-                                : Colors.grey.shade800,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 14),
 
                     _PrimaryButton(text: 'تسجيل الدخول', onPressed: login),
 
@@ -1464,44 +1379,6 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
 
                       const SizedBox(height: 28),
-
-                      const Text(
-                        'إجراء مكالمة',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(
-                        'أدخل ID المستخدم الذي تريد الاتصال به',
-                        style: TextStyle(
-                          color: Colors.grey.shade600,
-                          fontSize: 14,
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      _Field(
-                        controller: callIdController,
-                        label: 'ID المستخدم',
-                        hint: 'مثال: 2',
-                        icon: Icons.badge_outlined,
-                        keyboardType: TextInputType.number,
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      _PrimaryButton(
-                        text: 'بدء المكالمة',
-                        onPressed: startCall,
-                      ),
-
-                      const SizedBox(height: 30),
 
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
