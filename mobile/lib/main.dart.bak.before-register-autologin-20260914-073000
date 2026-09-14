@@ -2305,64 +2305,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!mounted) return;
 
     final success = result['success'] == true;
+    final message =
+        result['message']?.toString() ??
+        (success ? 'تم إنشاء الحساب بنجاح' : 'تعذر إنشاء الحساب');
 
-    if (!success) {
-      _message(
-        result['message']?.toString() ?? 'تعذر إنشاء الحساب',
-      );
-      return;
-    }
+    _message(message, success: success);
 
-    final loginResult = await AccountApi.login(
-      userId: userId,
-      password: password,
-    );
+    if (!success) return;
+
+    await Future.delayed(const Duration(milliseconds: 700));
 
     if (!mounted) return;
 
-    final loginSuccess = loginResult['success'] == true;
-    if (!loginSuccess) {
-      _message(
-        loginResult['message']?.toString() ?? 'تم إنشاء الحساب، ولكن تعذر تسجيل الدخول التلقائي',
-      );
-      return;
-    }
-
-    final user = loginResult['user'];
-    if (user is! Map) {
-      _message('بيانات المستخدم غير صالحة');
-      return;
-    }
-
-    final loggedUserId = user['user_id']?.toString();
-    final loggedUsername = user['username']?.toString() ?? username;
-    final accessToken = loginResult['access_token']?.toString();
-
-    if (loggedUserId == null ||
-        loggedUserId.isEmpty ||
-        accessToken == null ||
-        accessToken.isEmpty) {
-      _message('بيانات الجلسة ناقصة');
-      return;
-    }
-
-    await CallSession.instance.login(
-      id: loggedUserId,
-      name: loggedUsername,
-      token: accessToken,
-    );
-
-    await FirebaseMessagingService.instance.refreshTokenForCurrentUser();
-
-    if (!mounted) return;
-
-    _message('تم إنشاء الحساب وتسجيل الدخول بنجاح', success: true);
-
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
-      (route) => false,
-    );
+    Navigator.pop(context);
   }
 
   void _message(String text, {bool success = false}) {
