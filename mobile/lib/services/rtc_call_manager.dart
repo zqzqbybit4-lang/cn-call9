@@ -397,7 +397,6 @@ class RtcCallManager {
     if (id.isEmpty) return;
 
     await session.markCallEnded(id);
-    await session.clearPendingIncomingCall(id);
 
     if (reason == 'cancelled') {
       onRemoteCallCancelled?.call(id);
@@ -686,7 +685,6 @@ class RtcCallManager {
       await livekit.disconnect();
 
       await session.markCallEnded(callId);
-      await session.clearPendingIncomingCall(callId);
       if (callId != null) CallCoordinator.instance.markEnded(callId);
 
       _pendingIceCandidates.clear();

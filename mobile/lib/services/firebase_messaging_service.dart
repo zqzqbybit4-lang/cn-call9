@@ -125,9 +125,7 @@ class FirebaseMessagingService {
 
           if (await CallSession.instance.isCallEnded(callId)) return;
           if (await CallSession.instance.hasActiveCall()) return;
-          // Native CallFirebaseService owns incoming_call delivery through
-          // Telecom. Keeping this out of pending_incoming_call prevents the
-          // legacy Flutter incoming screen from duplicating the Telecom call.
+          // Native CallFirebaseService owns incoming_call delivery through Telecom.
           print('FCM FOREGROUND: incoming_call owned by native Telecom call_id=$callId');
         },
       );
