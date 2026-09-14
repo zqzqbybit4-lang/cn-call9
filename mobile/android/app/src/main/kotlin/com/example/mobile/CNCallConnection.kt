@@ -66,9 +66,11 @@ class CNCallConnection(
     init {
         setAudioModeIsVoip(true)
         setAddress(address, CallLog.Calls.PRESENTATION_ALLOWED)
-        val displayName = callerName.trim()
-            .takeIf { it.isNotEmpty() && it != callerId.trim() }
-            ?: "مستخدم CN CALL"
+        val displayName = CNCallContactResolver.resolveDisplayName(
+            context = appContext,
+            callerId = callerId,
+            serverCallerName = callerName,
+        )
         setCallerDisplayName(displayName, CallLog.Calls.PRESENTATION_ALLOWED)
     }
 
