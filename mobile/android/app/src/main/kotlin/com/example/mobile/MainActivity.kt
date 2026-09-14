@@ -231,6 +231,12 @@ class MainActivity : FlutterActivity() {
                             ) {
                                 add(android.Manifest.permission.READ_PHONE_NUMBERS)
                             }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                                checkSelfPermission(android.Manifest.permission.READ_CONTACTS) !=
+                                    PackageManager.PERMISSION_GRANTED
+                            ) {
+                                add(android.Manifest.permission.READ_CONTACTS)
+                            }
                         }
                         if (permissions.isEmpty()) {
                             result.success(true)
@@ -346,7 +352,10 @@ class MainActivity : FlutterActivity() {
         val hasPhoneNumbers = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
             checkSelfPermission(android.Manifest.permission.READ_PHONE_NUMBERS) ==
                 PackageManager.PERMISSION_GRANTED
-        return hasAudio && hasPhoneNumbers
+        val hasContacts = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            checkSelfPermission(android.Manifest.permission.READ_CONTACTS) ==
+                PackageManager.PERMISSION_GRANTED
+        return hasAudio && hasPhoneNumbers && hasContacts
     }
 
     private fun requestNextStartupPermission() {

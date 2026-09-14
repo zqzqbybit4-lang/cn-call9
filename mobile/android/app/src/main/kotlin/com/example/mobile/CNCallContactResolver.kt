@@ -49,11 +49,11 @@ object CNCallContactResolver {
             val projection = arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME)
 
             context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val nameIdx = cursor.getColumnIndex(ContactsContract.PhoneLookup.DISPLAY_NAME)
-                    if (nameIdx != -1) {
+                val nameIdx = cursor.getColumnIndex(ContactsContract.PhoneLookup.DISPLAY_NAME)
+                if (nameIdx != -1) {
+                    while (cursor.moveToNext()) {
                         val name = cursor.getString(nameIdx)?.trim()
-                        if (!name.isNullOrEmpty()) {
+                        if (!name.isNullOrEmpty() && name != callerId.trim()) {
                             return name
                         }
                     }
