@@ -316,24 +316,6 @@ class RtcCallManager {
     final messageCallId = message['call_id']?.toString().trim();
 
     if (type == 'call') {
-      if (messageCallId == null ||
-          messageCallId.isEmpty ||
-          await session.isCallEnded(messageCallId) ||
-          currentCallId != null) {
-        return;
-      }
-      if (CallCoordinator.instance.beginIncoming(messageCallId) !=
-          CallCommandResult.accepted) {
-        return;
-      }
-      currentCallId = messageCallId;
-      await session.markCallActive(messageCallId);
-      state = CallState.incoming;
-      remoteUserId = message['from_id']?.toString();
-
-      print('[CN CALL][CALL RECEIVE] call_id=$messageCallId from=$remoteUserId');
-
-      onIncomingCall?.call(message);
       return;
     }
 
