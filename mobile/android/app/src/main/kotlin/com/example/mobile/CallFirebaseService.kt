@@ -101,7 +101,7 @@ class CallFirebaseService : FirebaseMessagingService() {
 
         // Phase 4 (foreground): when Flutter itself is already ringing/managing
         // THIS exact call (it reached the call first through its own WebSocket
-        // and wrote flutter.cn_call_active_call_id),
+        // and wrote flutter.cn_call_active_call_id / pending_incoming_call),
         // the same call must not also be presented to Telecom. Presenting it
         // would create a second answer path (system UI) that could send its own
         // call_accept for the same call_id — or fail the system answer because
@@ -153,12 +153,22 @@ class CallFirebaseService : FirebaseMessagingService() {
     /**
      * True when this exact call_id is currently owned by the Flutter app:
      * it is the active call Flutter is ringing/managing now
-     * (flutter.cn_call_active_call_id). Reads the same shared file and the same
+     * (flutter.cn_call_active_call_id) or the call Flutter persisted as pending
+     * (flutter.pending_incoming_call). Reads the same shared file and the same
      * fully-qualified keys the Flutter side writes; no new marker.
      */
     private fun isFlutterManagedSameCall(callId: String): Boolean {
         val prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
-        return prefs.getString("flutter.cn_call_active_call_id", "") == callId
+        if (prefs.getString("flutter.cn_call_active_call_id", "") == callId) return true
+        val pending = prefs.getString("flutter.pending_incoming_call", null)
+        if (!pending.isNullOrEmpty()) {
+            return try {
+                JSONObject(pending).optString("call_id") == callId
+            } catch (_: Exception) {
+                false
+            }
+        }
+        return false
     }
 
     private fun markCallEnded(callId: String) {
@@ -174,6 +184,11 @@ class CallFirebaseService : FirebaseMessagingService() {
             "flutter.cn_call_ended_call_ids_v2",
             JSONArray(endedIds).toString()
         )
+        // This is not the cold-start UI handoff.  It only clears a matching
+        // Flutter-owned pending invite from an already-running app.
+        val pending = prefs.getString("flutter.pending_incoming_call", null)
+        val pendingId = try { JSONObject(pending ?: "{}").optString("call_id") } catch (_: Exception) { "" }
+        if (pendingId == callId) editor.remove("flutter.pending_incoming_call")
         if (prefs.getString("flutter.cn_call_active_call_id", null) == callId) {
             editor.remove("flutter.cn_call_active_call_id")
             editor.remove("flutter.cn_call_active_call_at")

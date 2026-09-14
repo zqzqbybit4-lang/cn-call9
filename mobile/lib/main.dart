@@ -14,6 +14,7 @@ import 'services/call_session.dart';
 import 'services/firebase_messaging_service.dart';
 import 'services/account_api.dart';
 import 'services/rtc_call_manager.dart';
+import 'screens/incoming_call_screen.dart';
 import 'screens/active_call_screen.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -71,6 +72,99 @@ void _installTelecomEventHandler() {
   });
 }
 
+/// Entry point hosted only by CNCallIncomingActivity.  It deliberately avoids
+/// CNCallApp and the normal login/home navigation stack.
+@pragma('vm:entry-point')
+Future<void> incomingCallUiMain() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  _installTelecomEventHandler();
+  RtcCallManager.instance.startListening();
+
+  Map<Object?, Object?> bootstrap;
+  try {
+    bootstrap = Map<Object?, Object?>.from(
+      await _telecomChannel.invokeMethod<Map<Object?, Object?>>('incomingCallBootstrap') ?? const <Object?, Object?>{},
+    );
+  } on PlatformException {
+    runApp(const MaterialApp(home: SizedBox.shrink()));
+    return;
+  }
+  // These values come from CNCallIncomingActivity's launching Intent, not
+  // shared preferences.  That Intent is the sole cold-start UI handoff.
+  final callId = bootstrap['callId']?.toString().trim() ?? '';
+  final callerId = bootstrap['callerId']?.toString().trim() ?? '';
+  final callerName = bootstrap['callerName']?.toString() ?? 'مستخدم CN CALL';
+  if (callId.isEmpty || callerId.isEmpty || await CallSession.instance.isCallEnded(callId)) {
+    runApp(const MaterialApp(home: SizedBox.shrink()));
+    return;
+  }
+  if (!await CallSession.instance.restoreSession()) {
+    runApp(const MaterialApp(home: SizedBox.shrink()));
+    return;
+  }
+  await RtcCallManager.instance.prepareIncomingCall(callId: callId, callerId: callerId);
+  await RtcCallManager.instance.startIncomingRingtone();
+  runApp(MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: _DedicatedIncomingCallFlow(callId: callId, callerId: callerId, callerName: callerName),
+  ));
+}
+
+class _DedicatedIncomingCallFlow extends StatelessWidget {
+  final String callId;
+  final String callerId;
+  final String callerName;
+  const _DedicatedIncomingCallFlow({required this.callId, required this.callerId, required this.callerName});
+
+  @override
+  Widget build(BuildContext context) => IncomingCallScreen(
+    name: callerName, id: callerId, callId: callId,
+    onAccept: () async {
+      final permissionGranted = await const MethodChannel('cn_call/call').invokeMethod<bool>(
+        'recordAudioPermissionGranted',
+      ) ?? false;
+      if (!permissionGranted) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('يلزم السماح باستخدام الميكروفون لقبول المكالمة'),
+            ),
+          );
+        }
+        return;
+      }
+      await RtcCallManager.instance.acceptCall(callerId: callerId, callId: callId, userInitiated: true);
+      if (!context.mounted) return;
+      Navigator.of(context).pushReplacement(MaterialPageRoute(
+        builder: (_) => Builder(
+          builder: (activeContext) => ActiveCallScreen(
+            name: callerName, id: callerId,
+            onMute: RtcCallManager.instance.mute,
+            onSpeaker: RtcCallManager.instance.setSpeaker,
+            onEnd: () async {
+              await RtcCallManager.instance.hangup();
+              if (activeContext.mounted) {
+                Navigator.of(activeContext).pop();
+              }
+            },
+          ),
+        ),
+      ));
+    },
+    onReject: () async {
+      print('[CN CALL][REJECT DIAGNOSTIC] before rejectCall call_id=$callId');
+      await RtcCallManager.instance.rejectCall(callerId: callerId, callId: callId);
+      print('[CN CALL][REJECT DIAGNOSTIC] after rejectCall call_id=$callId');
+      if (context.mounted) {
+        print('[CN CALL][REJECT DIAGNOSTIC] before Navigator.pop call_id=$callId');
+        Navigator.of(context).pop();
+        print('[CN CALL][REJECT DIAGNOSTIC] after Navigator.pop call_id=$callId');
+      }
+    },
+    onMute: RtcCallManager.instance.mute,
+  );
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -697,7 +791,28 @@ class _HomeScreenState extends State<HomeScreen>
 
   bool _loadingData = true;
 
+  bool _incomingCallScreenOpen = false;
+  String? _incomingCallScreenCallId;
   bool _canUseFullScreenIntent = true;
+  bool? _cnCallPhoneAccountEnabled;
+
+  void _closeIncomingCallScreen() {
+    if (!_incomingCallScreenOpen) return;
+
+    if (!mounted) {
+      _incomingCallScreenOpen = false;
+      return;
+    }
+
+    final navigator = Navigator.of(context);
+
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
+
+    _incomingCallScreenOpen = false;
+    _incomingCallScreenCallId = null;
+  }
 
   @override
   void initState() {
@@ -711,8 +826,70 @@ class _HomeScreenState extends State<HomeScreen>
     final rtcManager = RtcCallManager.instance;
     rtcManager.startListening();
 
+    Future<void> showIncomingCall(Map<String, dynamic> call) async {
+      if (!mounted) return;
+
+      final callId = call['call_id']?.toString().trim() ?? '';
+      if (callId.isEmpty || await CallSession.instance.isCallEnded(callId)) {
+        return;
+      }
+
+      final callerId =
+          call['caller_id']?.toString() ?? call['from_id']?.toString() ?? '';
+
+      final callerName = call['caller_name']?.toString() ?? 'مستخدم CN CALL';
+
+      if (callerId.isEmpty) return;
+      if (_incomingCallScreenOpen) return;
+
+      await RtcCallManager.instance.prepareIncomingCall(
+        callId: callId,
+        callerId: callerId,
+      );
+      await RtcCallManager.instance.startIncomingRingtone();
+      _addHistory(name: callerName, id: callerId, incoming: true);
+
+      _incomingCallScreenOpen = true;
+      _incomingCallScreenCallId = callId;
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => IncomingCallScreen(
+            name: callerName,
+            id: callerId,
+            callId: callId,
+            onAccept: () async {
+              await RtcCallManager.instance.acceptCall(callerId: callerId, callId: callId, userInitiated: true);
+              if (context.mounted) Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => CallScreen(name: callerName, id: callerId)));
+            },
+            onReject: () async {
+              await RtcCallManager.instance.rejectCall(callerId: callerId, callId: callId);
+              if (context.mounted) Navigator.of(context).pop();
+            },
+            onMute: RtcCallManager.instance.mute,
+          ),
+        ),
+      ).whenComplete(() {
+        if (mounted) {
+          _incomingCallScreenOpen = false;
+          _incomingCallScreenCallId = null;
+        }
+      });
+    }
+
     // المكالمات القادمة مباشرة عبر WebSocket.
-    rtcManager.onIncomingCall = null;
+    rtcManager.onIncomingCall = showIncomingCall;
+
+    rtcManager.onRemoteCallCancelled = (callId) async {
+      if (_incomingCallScreenCallId != callId) return;
+      _closeIncomingCallScreen();
+    };
+
+    rtcManager.onDisconnected = () {
+      _closeIncomingCallScreen();
+    };
+
   }
 
   @override
@@ -740,7 +917,55 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _openFullScreenIntentSettings() async {
+    if (_incomingCallScreenOpen) return;
     await _telecomChannel.invokeMethod<bool>('openFullScreenIntentSettings');
+  }
+
+  Future<void> _registerCNCallPhoneAccount() async {
+    try {
+      final registered = await _telecomChannel.invokeMethod<bool>(
+        'registerCNCallPhoneAccount',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            registered == true
+                ? 'CN CALL account registered'
+                : 'CN CALL account registration returned false',
+          ),
+        ),
+      );
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Registration failed: ${error.message ?? error.code}')),
+      );
+    }
+  }
+
+  Future<void> _checkCNCallPhoneAccountEnabled() async {
+    try {
+      final enabled = await _telecomChannel.invokeMethod<bool>(
+        'isCNCallPhoneAccountEnabled',
+      );
+      if (!mounted) return;
+      setState(() => _cnCallPhoneAccountEnabled = enabled);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            enabled == true
+                ? 'CN CALL account is enabled'
+                : 'CN CALL account is not enabled',
+          ),
+        ),
+      );
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Check failed: ${error.message ?? error.code}')),
+      );
+    }
   }
 
   Future<void> _loadLocalData() async {
@@ -1065,7 +1290,7 @@ class _HomeScreenState extends State<HomeScreen>
             style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.5),
           ),
           actions: [
-            if (!_canUseFullScreenIntent)
+            if (!_canUseFullScreenIntent && !_incomingCallScreenOpen)
               IconButton(
                 tooltip: 'فعّل المكالمات بملء الشاشة',
                 onPressed: _openFullScreenIntentSettings,
@@ -1189,6 +1414,52 @@ class _HomeScreenState extends State<HomeScreen>
                               ),
                             ),
                           ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      Card(
+                        color: const Color(0xFF151515),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Text(
+                                'CN CALL PhoneAccount test',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              OutlinedButton(
+                                onPressed: _registerCNCallPhoneAccount,
+                                child: const Text('Register CN CALL Account'),
+                              ),
+                              const SizedBox(height: 8),
+                              OutlinedButton(
+                                onPressed: _checkCNCallPhoneAccountEnabled,
+                                child: const Text('Check CN CALL Enabled'),
+                              ),
+                              if (_cnCallPhoneAccountEnabled != null) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  _cnCallPhoneAccountEnabled == true
+                                      ? 'Enabled'
+                                      : 'Not enabled',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: _cnCallPhoneAccountEnabled == true
+                                        ? const Color(0xFF00E676)
+                                        : Colors.orange,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
                       ),
 

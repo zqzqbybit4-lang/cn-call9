@@ -144,12 +144,15 @@ object NativeWebSocketClient {
      * True while a Flutter-managed active/ringing call exists. Flutter writes
      * "flutter.cn_call_active_call_id" on any incoming ring/accept
      * (RtcCallManager → CallSession.markCallActive) and clears it on call end
-     * (markCallEnded). These block a native handoff so an outgoing call never seizes
-     * an in-progress Flutter call.
+     * (markCallEnded); "flutter.pending_incoming_call" covers a cold-start
+     * notification that has not been consumed yet. These block a native
+     * handoff so an outgoing call never seizes an in-progress Flutter call.
      */
     private fun flutterHasManagedCall(prefs: SharedPreferences): Boolean {
         val active = prefs.getString("flutter.cn_call_active_call_id", "").orEmpty()
-        return active.isNotEmpty()
+        if (active.isNotEmpty()) return true
+        val pending = prefs.getString("flutter.pending_incoming_call", null)
+        return !pending.isNullOrEmpty()
     }
 
     /**

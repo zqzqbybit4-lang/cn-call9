@@ -37,6 +37,7 @@ class MainActivity : FlutterActivity() {
         const val ACTION_INCOMING_CALL = "com.example.mobile.action.INCOMING_CALL"
         private const val EVENTS_CHANNEL = "cn_call/telecom_events"
         private const val PREFERENCES = "FlutterSharedPreferences"
+        private const val PENDING_CALL_KEY = "flutter.pending_incoming_call"
         private const val REQUEST_CALL_PHONE = 9301
 
         /**
@@ -497,6 +498,9 @@ class MainActivity : FlutterActivity() {
         if (data["call_id"].isNullOrEmpty() || data["caller_id"].isNullOrEmpty()) {
             return false
         }
+        getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit()
+            .putString(PENDING_CALL_KEY, JSONObject(data).toString())
+            .apply()
         return true
     }
 
