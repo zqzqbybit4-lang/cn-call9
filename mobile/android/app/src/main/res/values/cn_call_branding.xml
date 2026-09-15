@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="cn_call_icon_background">#0B1118</color>
+    <color name="cn_call_icon_foreground">#FFFFFF</color>
+    <color name="cn_call_icon_accent">#39E6B0</color>
+</resources>

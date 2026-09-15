@@ -935,7 +935,7 @@ object CNCallEngine {
                                 "[CN CALL][ENGINE] signaling call_started stale" +
                                     " call_id=$frameCallId",
                             )
-                            return@handleSignalingFrame
+                            return
                         }
                     }
 
