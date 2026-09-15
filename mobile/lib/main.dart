@@ -361,12 +361,12 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _runStartupPermissionFlow() async {
-    await FirebaseMessagingService.instance.initialize();
     try {
       await _telecomChannel.invokeMethod<bool>('requestStartupPermissions');
     } on PlatformException {
       // _verifySetup reports the incomplete permission state and setup can retry.
     }
+    await FirebaseMessagingService.instance.initialize();
     if (mounted) {
       await _verifySetup();
 
@@ -390,7 +390,7 @@ class _LoginScreenState extends State<LoginScreen>
     if (!mounted) return;
     showDialog<void>(
       context: context,
-      barrierDismissible: true,
+      barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
           backgroundColor: const Color(0xFF1E1E1E),
@@ -427,13 +427,6 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text(
-                'لاحقًا',
-                style: TextStyle(color: Colors.grey),
-              ),
-            ),
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(dialogContext);
@@ -472,7 +465,6 @@ class _LoginScreenState extends State<LoginScreen>
       });
 
       if (!enabled) {
-        _message('فعّل حساب CN CALL من إعدادات المكالمات ثم عد للتطبيق');
         await _telecomChannel.invokeMethod<bool>('openTelecomCallSettings');
       } else {
         _message('حساب CN CALL مفعّل', success: true);
@@ -709,7 +701,6 @@ class _HomeScreenState extends State<HomeScreen>
   bool _incomingCallScreenOpen = false;
   String? _incomingCallScreenCallId;
   bool _canUseFullScreenIntent = true;
-  bool? _cnCallPhoneAccountEnabled;
 
   void _closeIncomingCallScreen() {
     if (!_incomingCallScreenOpen) return;
@@ -836,52 +827,6 @@ class _HomeScreenState extends State<HomeScreen>
     await _telecomChannel.invokeMethod<bool>('openFullScreenIntentSettings');
   }
 
-  Future<void> _registerCNCallPhoneAccount() async {
-    try {
-      final registered = await _telecomChannel.invokeMethod<bool>(
-        'registerCNCallPhoneAccount',
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            registered == true
-                ? 'CN CALL account registered'
-                : 'CN CALL account registration returned false',
-          ),
-        ),
-      );
-    } on PlatformException catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Registration failed: ${error.message ?? error.code}')),
-      );
-    }
-  }
-
-  Future<void> _checkCNCallPhoneAccountEnabled() async {
-    try {
-      final enabled = await _telecomChannel.invokeMethod<bool>(
-        'isCNCallPhoneAccountEnabled',
-      );
-      if (!mounted) return;
-      setState(() => _cnCallPhoneAccountEnabled = enabled);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            enabled == true
-                ? 'CN CALL account is enabled'
-                : 'CN CALL account is not enabled',
-          ),
-        ),
-      );
-    } on PlatformException catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Check failed: ${error.message ?? error.code}')),
-      );
-    }
-  }
 
   Future<void> _loadLocalData() async {
     final prefs = await SharedPreferences.getInstance();
@@ -1176,7 +1121,6 @@ class _HomeScreenState extends State<HomeScreen>
       // (active/ended events) and ends it through Telecom — no second Uuid,
       // no Flutter WebSocket, no separate signaling for this callId.
       manager.remoteUserId = id;
-      await manager.startOutgoingRingback(callId);
 
       Navigator.push(
         context,
@@ -1205,12 +1149,6 @@ class _HomeScreenState extends State<HomeScreen>
             style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.5),
           ),
           actions: [
-            if (!_canUseFullScreenIntent && !_incomingCallScreenOpen)
-              IconButton(
-                tooltip: 'فعّل المكالمات بملء الشاشة',
-                onPressed: _openFullScreenIntentSettings,
-                icon: const Icon(Icons.fullscreen_rounded),
-              ),
             IconButton(
               tooltip: 'تسجيل الخروج',
               onPressed: () async {
@@ -1329,52 +1267,6 @@ class _HomeScreenState extends State<HomeScreen>
                               ),
                             ),
                           ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      Card(
-                        color: const Color(0xFF151515),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              const Text(
-                                'CN CALL PhoneAccount test',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              OutlinedButton(
-                                onPressed: _registerCNCallPhoneAccount,
-                                child: const Text('Register CN CALL Account'),
-                              ),
-                              const SizedBox(height: 8),
-                              OutlinedButton(
-                                onPressed: _checkCNCallPhoneAccountEnabled,
-                                child: const Text('Check CN CALL Enabled'),
-                              ),
-                              if (_cnCallPhoneAccountEnabled != null) ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  _cnCallPhoneAccountEnabled == true
-                                      ? 'Enabled'
-                                      : 'Not enabled',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: _cnCallPhoneAccountEnabled == true
-                                        ? const Color(0xFF00E676)
-                                        : Colors.orange,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
                         ),
                       ),
 

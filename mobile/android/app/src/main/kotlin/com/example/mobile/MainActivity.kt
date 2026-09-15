@@ -219,6 +219,12 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         val permissions = buildList {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                                    PackageManager.PERMISSION_GRANTED
+                            ) {
+                                add(android.Manifest.permission.POST_NOTIFICATIONS)
+                            }
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
                                 checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
                                     PackageManager.PERMISSION_GRANTED
@@ -351,6 +357,9 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun hasStartupPermissions(): Boolean {
+        val hasNotifications = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
         val hasAudio = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
                 PackageManager.PERMISSION_GRANTED
@@ -360,7 +369,7 @@ class MainActivity : FlutterActivity() {
         val hasContacts = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
             checkSelfPermission(android.Manifest.permission.READ_CONTACTS) ==
                 PackageManager.PERMISSION_GRANTED
-        return hasAudio && hasPhoneNumbers && hasContacts
+        return hasNotifications && hasAudio && hasPhoneNumbers && hasContacts
     }
 
     private fun requestNextStartupPermission() {
