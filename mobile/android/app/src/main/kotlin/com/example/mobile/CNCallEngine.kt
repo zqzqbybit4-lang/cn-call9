@@ -929,21 +929,24 @@ object CNCallEngine {
                             ?.equals("true", ignoreCase = true)
                             == true
 
+                    var isStale = false
                     synchronized(lock) {
                         if (frameCallId != scoredCallId || !isCaller) {
                             println(
                                 "[CN CALL][ENGINE] signaling call_started stale" +
                                     " call_id=$frameCallId",
                             )
-                            return
+                            isStale = true
                         }
                     }
 
-                    println(
-                        "[CN CALL][ENGINE] signaling call_started" +
-                            " call_id=$frameCallId target_online=$targetOnline",
-                    )
-                    callbacks?.onCallStarted(targetOnline)
+                    if (!isStale) {
+                        println(
+                            "[CN CALL][ENGINE] signaling call_started" +
+                                " call_id=$frameCallId target_online=$targetOnline",
+                        )
+                        callbacks?.onCallStarted(targetOnline)
+                    }
                 }
 
                 "call_accept" -> {

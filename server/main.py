@@ -1146,8 +1146,23 @@ async def websocket_endpoint(
                 _mark_active_user(target_id, call_id, "callee")
 
                 target_socket = connections.get(target_id)
-                delivered = False
+                target_online = target_socket is not None
 
+                await websocket.send_json({
+                    "type": "call_started",
+                    "call_id": call_id,
+                    "target_id": target_id,
+                    "from_id": user_id,
+                    "ring_expires_at": ring_expires_at,
+                    "target_online": target_online,
+                })
+
+                print(
+                    "[CN CALL][CALL INITIAL WS ATTEMPT] "
+                    f"call_id={call_id} target={target_id} "
+                    f"socket_present={target_socket is not None}"
+                )
+                delivered = False
                 if target_socket is not None:
                     try:
                         await target_socket.send_json({
@@ -1166,23 +1181,6 @@ async def websocket_endpoint(
                             "[CN CALL][CALL INITIAL WS FAILED] "
                             f"call_id={call_id} target={target_id} error={exc}"
                         )
-                        if connections.get(target_id) is target_socket:
-                            connections.pop(target_id, None)
-
-                await websocket.send_json({
-                    "type": "call_started",
-                    "call_id": call_id,
-                    "target_id": target_id,
-                    "from_id": user_id,
-                    "ring_expires_at": ring_expires_at,
-                    "target_online": delivered,
-                })
-
-                print(
-                    "[CN CALL][CALL INITIAL WS ATTEMPT] "
-                    f"call_id={call_id} target={target_id} "
-                    f"socket_delivered={delivered}"
-                )
 
                 if not delivered:
                     print(

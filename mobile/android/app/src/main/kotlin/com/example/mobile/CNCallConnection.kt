@@ -27,10 +27,6 @@ class CNCallConnection(
     private var ringbackPlayer: MediaPlayer? = null
     private var ringbackGeneration = 0L
     internal val engineCallbacks = object : CNCallEngine.Callbacks {
-        override fun onCallStarted(targetOnline: Boolean) {
-            this@CNCallConnection.onCallStarted(targetOnline)
-        }
-
         override fun onMediaReady() {
             if (terminal || active) return
 
@@ -70,11 +66,9 @@ class CNCallConnection(
     init {
         setAudioModeIsVoip(true)
         setAddress(address, CallLog.Calls.PRESENTATION_ALLOWED)
-        val displayName = CNCallContactResolver.resolveDisplayName(
-            context = appContext,
-            callerId = callerId,
-            serverCallerName = callerName,
-        )
+        val displayName = callerName.trim()
+            .takeIf { it.isNotEmpty() && it != callerId.trim() }
+            ?: "مستخدم CN CALL"
         setCallerDisplayName(displayName, CallLog.Calls.PRESENTATION_ALLOWED)
     }
 
@@ -87,22 +81,9 @@ class CNCallConnection(
     fun beginDialing() {
         if (!terminal) {
             setDialing()
-        }
-    }
-
-    internal fun onCallStarted(targetOnline: Boolean) {
-        if (terminal || incoming) return
-
-        if (targetOnline) {
-            startOutgoingRingback()
-            println(
-                "[CN CALL][RINGBACK] target_online=true call_id=$callId",
-            )
-        } else {
-            stopOutgoingRingback()
-            println(
-                "[CN CALL][RINGBACK SKIPPED] target_online=false call_id=$callId",
-            )
+            if (!incoming) {
+                startOutgoingRingback()
+            }
         }
     }
 

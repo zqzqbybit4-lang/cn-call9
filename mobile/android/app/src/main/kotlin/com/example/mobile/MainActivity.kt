@@ -219,12 +219,6 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                         val permissions = buildList {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-                                    PackageManager.PERMISSION_GRANTED
-                            ) {
-                                add(android.Manifest.permission.POST_NOTIFICATIONS)
-                            }
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
                                 checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
                                     PackageManager.PERMISSION_GRANTED
@@ -236,12 +230,6 @@ class MainActivity : FlutterActivity() {
                                     PackageManager.PERMISSION_GRANTED
                             ) {
                                 add(android.Manifest.permission.READ_PHONE_NUMBERS)
-                            }
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                                checkSelfPermission(android.Manifest.permission.READ_CONTACTS) !=
-                                    PackageManager.PERMISSION_GRANTED
-                            ) {
-                                add(android.Manifest.permission.READ_CONTACTS)
                             }
                         }
                         if (permissions.isEmpty()) {
@@ -267,10 +255,10 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                     "openTelecomCallSettings" -> {
-                        // Shows the system "Calling accounts / Phone accounts" preference screen
-                        // where the user toggles the CN CALL PhoneAccount on/off.
-                        val target = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            Intent(TelecomManager.ACTION_CHANGE_PHONE_ACCOUNTS)
+                        // Shows the system "Calling accounts" screen where the
+                        // user toggles the CN CALL PhoneAccount on/off.
+                        val target = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            Intent(TelecomManager.ACTION_SHOW_CALL_SETTINGS)
                         } else {
                             Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
                         }
@@ -278,12 +266,7 @@ class MainActivity : FlutterActivity() {
                             startActivity(target)
                             result.success(true)
                         } catch (_: ActivityNotFoundException) {
-                            try {
-                                startActivity(Intent(TelecomManager.ACTION_SHOW_CALL_SETTINGS))
-                                result.success(true)
-                            } catch (_: ActivityNotFoundException) {
-                                result.success(false)
-                            }
+                            result.success(false)
                         }
                     }
                     "canUseFullScreenIntent" -> {
@@ -357,19 +340,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun hasStartupPermissions(): Boolean {
-        val hasNotifications = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED
         val hasAudio = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
                 PackageManager.PERMISSION_GRANTED
         val hasPhoneNumbers = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
             checkSelfPermission(android.Manifest.permission.READ_PHONE_NUMBERS) ==
                 PackageManager.PERMISSION_GRANTED
-        val hasContacts = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
-            checkSelfPermission(android.Manifest.permission.READ_CONTACTS) ==
-                PackageManager.PERMISSION_GRANTED
-        return hasNotifications && hasAudio && hasPhoneNumbers && hasContacts
+        return hasAudio && hasPhoneNumbers
     }
 
     private fun requestNextStartupPermission() {

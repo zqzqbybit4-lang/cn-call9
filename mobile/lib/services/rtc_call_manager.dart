@@ -354,15 +354,7 @@ class RtcCallManager {
           ? expiresAtRaw
           : int.tryParse(expiresAtRaw?.toString() ?? '');
 
-      final targetOnline = message['target_online'] == true;
-      if (targetOnline) {
-        await _startRinging(callId: messageCallId!, expiresAt: _callStartExpiresAt);
-      } else {
-        await _stopRinging();
-        print(
-          '[CN CALL][RINGBACK SKIPPED] call_id=$messageCallId target_online=false',
-        );
-      }
+      await _startRinging(callId: messageCallId!, expiresAt: _callStartExpiresAt);
 
       // call_started itself confirms that the server accepted the call.
       // target_online only tells us whether the target has a live WebSocket.

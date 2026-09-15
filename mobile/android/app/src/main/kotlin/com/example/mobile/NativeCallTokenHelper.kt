@@ -120,46 +120,34 @@ object NativeCallTokenHelper {
     }
 
     private fun fetch(url: HttpUrl, accessToken: String): LiveKitTokenResult? {
-        val request = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer $accessToken")
-            .build()
+        return try {
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $accessToken")
+                .build()
 
-        val maxAttempts = 3
-        for (attempt in 1..maxAttempts) {
-            try {
-                val response = httpClient.newCall(request).execute()
-                val code = response.code
-                if (code == 409 && attempt < maxAttempts) {
-                    response.close()
-                    val delayMs = if (attempt == 1) 150L else 300L
-                    try { Thread.sleep(delayMs) } catch (_: InterruptedException) {}
-                    continue
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@use null
                 }
-                response.use { resp ->
-                    if (!resp.isSuccessful) {
-                        return null
-                    }
-                    val body = resp.body?.string() ?: return null
-                    val json = JSONObject(body)
-                    val success = json.optBoolean("success", false)
-                    val livekitUrl = json.optString("url", "")
-                    val livekitToken = json.optString("token", "")
-                    val room = json.optString("room", "")
-                    if (!success ||
-                        livekitUrl.isEmpty() ||
-                        livekitToken.isEmpty() ||
-                        room.isEmpty()
-                    ) {
-                        return null
-                    }
-                    return LiveKitTokenResult(livekitUrl, livekitToken, room)
+                val body = response.body?.string() ?: return@use null
+                val json = JSONObject(body)
+                val success = json.optBoolean("success", false)
+                val livekitUrl = json.optString("url", "")
+                val livekitToken = json.optString("token", "")
+                val room = json.optString("room", "")
+                if (!success ||
+                    livekitUrl.isEmpty() ||
+                    livekitToken.isEmpty() ||
+                    room.isEmpty()
+                ) {
+                    return@use null
                 }
-            } catch (e: Exception) {
-                return null
+                LiveKitTokenResult(livekitUrl, livekitToken, room)
             }
+        } catch (e: Exception) {
+            null
         }
-        return null
     }
 
     private fun prefs(context: Context): SharedPreferences {
