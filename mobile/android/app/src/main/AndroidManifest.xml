@@ -14,9 +14,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
 
     <application
-        android:label="mobile"
+        android:label="CN CALL"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_cn_call">
         <activity
             android:name=".MainActivity"
             android:exported="true"

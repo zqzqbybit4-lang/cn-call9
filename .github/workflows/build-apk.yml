@@ -1,4 +1,4 @@
-name: Build Android Debug APK
+name: Build Android Release ARM64 Split APK
 
 on:
   push:
@@ -32,14 +32,14 @@ jobs:
           cd mobile
           flutter pub get
 
-      - name: Build APK Debug
+      - name: Build APK Release ARM64 Split
         run: |
           cd mobile
-          flutter build apk --debug
+          flutter build apk --release --split-per-abi --target-platform=android-arm64
 
-      - name: Upload Debug APK Artifact
+      - name: Upload ARM64 Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug.apk
-          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
+          name: cn-call-arm64-release
+          path: mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           retention-days: 14
