@@ -74,6 +74,7 @@ object CNCallEngine {
      * into Connection state.
      */
     interface Callbacks {
+        fun onCallStarted(targetOnline: Boolean)
         fun onMediaReady()
         fun onDisconnected()
         fun onError(message: String)
@@ -918,9 +919,34 @@ object CNCallEngine {
                 }
 
                 "call_started" -> {
-                    // Caller-side ack that the server accepted the call
-                    // (main.py line 1069). No state change needed here.
-                    println("[CN CALL][ENGINE] signaling call_started call_id=$frameCallId")
+                    // Caller-side ack that the server accepted the call.
+                    // target_online is the server's presence/delivery result:
+                    // true  = target socket accepted the initial call frame;
+                    // false = target was offline, so FCM is the fallback.
+                    val targetOnline =
+                        payload["target_online"]
+                            ?.trim()
+                            ?.equals("true", ignoreCase = true)
+                            == true
+
+                    var isStale = false
+                    synchronized(lock) {
+                        if (frameCallId != scoredCallId || !isCaller) {
+                            println(
+                                "[CN CALL][ENGINE] signaling call_started stale" +
+                                    " call_id=$frameCallId",
+                            )
+                            isStale = true
+                        }
+                    }
+
+                    if (!isStale) {
+                        println(
+                            "[CN CALL][ENGINE] signaling call_started" +
+                                " call_id=$frameCallId target_online=$targetOnline",
+                        )
+                        callbacks?.onCallStarted(targetOnline)
+                    }
                 }
 
                 "call_accept" -> {
