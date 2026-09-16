@@ -2,13 +2,21 @@ name: Android Release Split APK
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref/branch to build'
+        required: true
+        default: 'jules-14399745368418415334-28cffc24'
+        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout selected ref
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Set up Java
         uses: actions/setup-java@v4
