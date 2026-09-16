@@ -17,11 +17,6 @@ class CallSession {
     socket.onCheckOwnership = guardFlutterWsOwnership;
   }
 
-  final StreamController<Map<String, dynamic>> _incomingCalls =
-      StreamController<Map<String, dynamic>>.broadcast();
-
-  Stream<Map<String, dynamic>> get incomingCalls => _incomingCalls.stream;
-
   StreamSubscription<Map<String, dynamic>>? _messageSubscription;
 
   String? userId;

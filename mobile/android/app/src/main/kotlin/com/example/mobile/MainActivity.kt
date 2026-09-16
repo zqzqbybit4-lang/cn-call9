@@ -34,10 +34,8 @@ class MainActivity : FlutterActivity() {
     private var startupPermissions = emptyList<String>()
     private var startupPermissionIndex = 0
     companion object {
-        const val ACTION_INCOMING_CALL = "com.example.mobile.action.INCOMING_CALL"
         private const val EVENTS_CHANNEL = "cn_call/telecom_events"
         private const val PREFERENCES = "FlutterSharedPreferences"
-        private const val PENDING_CALL_KEY = "flutter.pending_incoming_call"
         private const val REQUEST_CALL_PHONE = 9301
 
         /**
@@ -72,18 +70,11 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        persistIncomingIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (persistIncomingIntent(intent)) {
-            flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
-                MethodChannel(messenger, EVENTS_CHANNEL)
-                    .invokeMethod("incomingCall", incomingArguments(intent))
-            }
-        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -492,23 +483,4 @@ class MainActivity : FlutterActivity() {
         super.onDestroy()
     }
 
-    private fun persistIncomingIntent(intent: Intent?): Boolean {
-        if (intent?.action != ACTION_INCOMING_CALL) return false
-        val data = incomingArguments(intent)
-        if (data["call_id"].isNullOrEmpty() || data["caller_id"].isNullOrEmpty()) {
-            return false
-        }
-        getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit()
-            .putString(PENDING_CALL_KEY, JSONObject(data).toString())
-            .apply()
-        return true
-    }
-
-    private fun incomingArguments(intent: Intent): Map<String, String> = mapOf(
-        "type" to "incoming_call",
-        "call_id" to intent.getStringExtra("call_id").orEmpty(),
-        "caller_id" to intent.getStringExtra("caller_id").orEmpty(),
-        "caller_name" to intent.getStringExtra("caller_name").orEmpty(),
-        "from_id" to intent.getStringExtra("caller_id").orEmpty(),
-    )
 }

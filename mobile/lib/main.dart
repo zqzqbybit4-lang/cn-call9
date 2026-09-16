@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,7 +13,6 @@ import 'services/call_session.dart';
 import 'services/firebase_messaging_service.dart';
 import 'services/account_api.dart';
 import 'services/rtc_call_manager.dart';
-import 'screens/active_call_screen.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -32,15 +30,6 @@ void _installTelecomEventHandler() {
     // Android uses this event only to wake/bring the Flutter activity forward.
     // Rendering and all call decisions remain in Flutter; it must never create
     // a Telecom/InCallUI call.
-    if (call.method == 'incomingCall') {
-      // Native Telecom owns this call. Do not turn the same event into a
-      // pending Flutter incoming screen.
-      print(
-        'Telecom incoming event ignored by legacy Flutter UI '
-        'call_id=${arguments['callId']}',
-      );
-      return;
-    }
     if (call.method == 'muteChanged') {
       final callId = arguments['callId']?.toString() ?? '';
       if (callId.isNotEmpty && RtcCallManager.instance.currentCallId == callId) {
@@ -1114,7 +1103,7 @@ class _HomeScreenState extends State<HomeScreen>
             style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.5),
           ),
           actions: [
-            if (!_canUseFullScreenIntent && !_incomingCallScreenOpen)
+            if (!_canUseFullScreenIntent)
               IconButton(
                 tooltip: 'فعّل المكالمات بملء الشاشة',
                 onPressed: _openFullScreenIntentSettings,
