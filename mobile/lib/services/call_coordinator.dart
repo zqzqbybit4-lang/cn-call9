@@ -88,67 +88,6 @@ class CallCoordinator {
     return CallCommandResult.accepted;
   }
 
-  CallCommandResult beginIncoming(String id) {
-    final safeId = id.trim();
-    if (safeId.isEmpty) {
-      return CallCommandResult.staleCall;
-    }
-
-    if (hasActiveCall) {
-      return CallCommandResult.blockedByActiveCall;
-    }
-
-    _callId = safeId;
-    _state = CoordinatedCallState.ringing;
-
-    print(
-      '[CN CALL][COORDINATOR] incoming '
-      'call_id=$safeId',
-    );
-
-    return CallCommandResult.accepted;
-  }
-
-  CallCommandResult beginAccept(String id) {
-    if (!owns(id)) {
-      return CallCommandResult.staleCall;
-    }
-
-    if (_state == CoordinatedCallState.accepting ||
-        _state == CoordinatedCallState.negotiating ||
-        _state == CoordinatedCallState.connecting ||
-        _state == CoordinatedCallState.active) {
-      return CallCommandResult.alreadyProcessing;
-    }
-
-    if (_state != CoordinatedCallState.ringing) {
-      return CallCommandResult.staleCall;
-    }
-
-    _state = CoordinatedCallState.accepting;
-
-    print(
-      '[CN CALL][COORDINATOR] accepting '
-      'call_id=$id',
-    );
-
-    return CallCommandResult.accepted;
-  }
-
-  CallCommandResult beginNegotiation(String id) {
-    if (!owns(id)) {
-      return CallCommandResult.staleCall;
-    }
-
-    if (_state == CoordinatedCallState.ended ||
-        _state == CoordinatedCallState.ending) {
-      return CallCommandResult.staleCall;
-    }
-
-    _state = CoordinatedCallState.negotiating;
-
-    return CallCommandResult.accepted;
-  }
 
   CallCommandResult beginConnecting(String id) {
     if (!owns(id)) {

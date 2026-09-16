@@ -14,7 +14,6 @@ import 'services/call_session.dart';
 import 'services/firebase_messaging_service.dart';
 import 'services/account_api.dart';
 import 'services/rtc_call_manager.dart';
-import 'screens/incoming_call_screen.dart';
 import 'screens/active_call_screen.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -70,100 +69,6 @@ void _installTelecomEventHandler() {
       return;
     }
   });
-}
-
-/// Entry point hosted only by CNCallIncomingActivity.  It deliberately avoids
-/// CNCallApp and the normal login/home navigation stack.
-@pragma('vm:entry-point')
-Future<void> incomingCallUiMain() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  _installTelecomEventHandler();
-  RtcCallManager.instance.startListening();
-
-  Map<Object?, Object?> bootstrap;
-  try {
-    bootstrap = Map<Object?, Object?>.from(
-      await _telecomChannel.invokeMethod<Map<Object?, Object?>>('incomingCallBootstrap') ?? const <Object?, Object?>{},
-    );
-  } on PlatformException {
-    runApp(const MaterialApp(home: SizedBox.shrink()));
-    return;
-  }
-  // These values come from CNCallIncomingActivity's launching Intent, not
-  // shared preferences.  That Intent is the sole cold-start UI handoff.
-  final callId = bootstrap['callId']?.toString().trim() ?? '';
-  final callerId = bootstrap['callerId']?.toString().trim() ?? '';
-  final callerName = bootstrap['callerName']?.toString() ?? 'مستخدم CN CALL';
-  if (callId.isEmpty || callerId.isEmpty || await CallSession.instance.isCallEnded(callId)) {
-    runApp(const MaterialApp(home: SizedBox.shrink()));
-    return;
-  }
-  if (!await CallSession.instance.restoreSession()) {
-    runApp(const MaterialApp(home: SizedBox.shrink()));
-    return;
-  }
-  await RtcCallManager.instance.prepareIncomingCall(callId: callId, callerId: callerId);
-  await RtcCallManager.instance.startIncomingRingtone();
-  runApp(MaterialApp(
-    debugShowCheckedModeBanner: false,
-    home: _DedicatedIncomingCallFlow(callId: callId, callerId: callerId, callerName: callerName),
-  ));
-}
-
-class _DedicatedIncomingCallFlow extends StatelessWidget {
-  final String callId;
-  final String callerId;
-  final String callerName;
-  const _DedicatedIncomingCallFlow({required this.callId, required this.callerId, required this.callerName});
-
-  @override
-  Widget build(BuildContext context) => IncomingCallScreen(
-    name: callerName, id: callerId, callId: callId,
-    onAccept: () async {
-      final permissionGranted = await const MethodChannel('cn_call/call').invokeMethod<bool>(
-        'recordAudioPermissionGranted',
-      ) ?? false;
-      if (!permissionGranted) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('يلزم السماح باستخدام الميكروفون لقبول المكالمة'),
-            ),
-          );
-        }
-        return;
-      }
-      await RtcCallManager.instance.acceptCall(callerId: callerId, callId: callId, userInitiated: true);
-      if (!context.mounted) return;
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
-        builder: (_) => Builder(
-          builder: (activeContext) => ActiveCallScreen(
-            name: callerName, id: callerId,
-            onMute: RtcCallManager.instance.mute,
-            onSpeaker: RtcCallManager.instance.setSpeaker,
-            onEnd: () async {
-              await RtcCallManager.instance.hangup();
-              if (activeContext.mounted) {
-                Navigator.of(activeContext).pop();
-              }
-            },
-          ),
-        ),
-      ));
-    },
-    onReject: () async {
-      print('[CN CALL][REJECT DIAGNOSTIC] before rejectCall call_id=$callId');
-      await RtcCallManager.instance.rejectCall(callerId: callerId, callId: callId);
-      print('[CN CALL][REJECT DIAGNOSTIC] after rejectCall call_id=$callId');
-      if (context.mounted) {
-        print('[CN CALL][REJECT DIAGNOSTIC] before Navigator.pop call_id=$callId');
-        Navigator.of(context).pop();
-        print('[CN CALL][REJECT DIAGNOSTIC] after Navigator.pop call_id=$callId');
-      }
-    },
-    onMute: RtcCallManager.instance.mute,
-  );
 }
 
 Future<void> main() async {
@@ -791,28 +696,8 @@ class _HomeScreenState extends State<HomeScreen>
 
   bool _loadingData = true;
 
-  bool _incomingCallScreenOpen = false;
-  String? _incomingCallScreenCallId;
   bool _canUseFullScreenIntent = true;
   bool? _cnCallPhoneAccountEnabled;
-
-  void _closeIncomingCallScreen() {
-    if (!_incomingCallScreenOpen) return;
-
-    if (!mounted) {
-      _incomingCallScreenOpen = false;
-      return;
-    }
-
-    final navigator = Navigator.of(context);
-
-    if (navigator.canPop()) {
-      navigator.pop();
-    }
-
-    _incomingCallScreenOpen = false;
-    _incomingCallScreenCallId = null;
-  }
 
   @override
   void initState() {
@@ -826,68 +711,8 @@ class _HomeScreenState extends State<HomeScreen>
     final rtcManager = RtcCallManager.instance;
     rtcManager.startListening();
 
-    Future<void> showIncomingCall(Map<String, dynamic> call) async {
-      if (!mounted) return;
-
-      final callId = call['call_id']?.toString().trim() ?? '';
-      if (callId.isEmpty || await CallSession.instance.isCallEnded(callId)) {
-        return;
-      }
-
-      final callerId =
-          call['caller_id']?.toString() ?? call['from_id']?.toString() ?? '';
-
-      final callerName = call['caller_name']?.toString() ?? 'مستخدم CN CALL';
-
-      if (callerId.isEmpty) return;
-      if (_incomingCallScreenOpen) return;
-
-      await RtcCallManager.instance.prepareIncomingCall(
-        callId: callId,
-        callerId: callerId,
-      );
-      await RtcCallManager.instance.startIncomingRingtone();
-      _addHistory(name: callerName, id: callerId, incoming: true);
-
-      _incomingCallScreenOpen = true;
-      _incomingCallScreenCallId = callId;
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => IncomingCallScreen(
-            name: callerName,
-            id: callerId,
-            callId: callId,
-            onAccept: () async {
-              await RtcCallManager.instance.acceptCall(callerId: callerId, callId: callId, userInitiated: true);
-              if (context.mounted) Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => CallScreen(name: callerName, id: callerId)));
-            },
-            onReject: () async {
-              await RtcCallManager.instance.rejectCall(callerId: callerId, callId: callId);
-              if (context.mounted) Navigator.of(context).pop();
-            },
-            onMute: RtcCallManager.instance.mute,
-          ),
-        ),
-      ).whenComplete(() {
-        if (mounted) {
-          _incomingCallScreenOpen = false;
-          _incomingCallScreenCallId = null;
-        }
-      });
-    }
-
-    // المكالمات القادمة مباشرة عبر WebSocket.
-    rtcManager.onIncomingCall = showIncomingCall;
-
-    rtcManager.onRemoteCallCancelled = (callId) async {
-      if (_incomingCallScreenCallId != callId) return;
-      _closeIncomingCallScreen();
-    };
-
     rtcManager.onDisconnected = () {
-      _closeIncomingCallScreen();
+      // Native Telecom handles incoming UI teardown.
     };
 
   }
@@ -917,7 +742,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _openFullScreenIntentSettings() async {
-    if (_incomingCallScreenOpen) return;
     await _telecomChannel.invokeMethod<bool>('openFullScreenIntentSettings');
   }
 
