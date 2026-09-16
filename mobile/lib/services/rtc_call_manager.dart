@@ -54,7 +54,6 @@ class RtcCallManager {
 
   Function()? onConnected;
   Function()? onDisconnected;
-  Function(Map<String, dynamic> message)? onIncomingCall;
   Function(String callId)? onRemoteCallCancelled;
   Function(bool online)? onRemoteAvailabilityChanged;
 
@@ -316,24 +315,8 @@ class RtcCallManager {
     final messageCallId = message['call_id']?.toString().trim();
 
     if (type == 'call') {
-      if (messageCallId == null ||
-          messageCallId.isEmpty ||
-          await session.isCallEnded(messageCallId) ||
-          currentCallId != null) {
-        return;
-      }
-      if (CallCoordinator.instance.beginIncoming(messageCallId) !=
-          CallCommandResult.accepted) {
-        return;
-      }
-      currentCallId = messageCallId;
-      await session.markCallActive(messageCallId);
-      state = CallState.incoming;
-      remoteUserId = message['from_id']?.toString();
-
-      print('[CN CALL][CALL RECEIVE] call_id=$messageCallId from=$remoteUserId');
-
-      onIncomingCall?.call(message);
+      print(
+          '[CN CALL][CALL RECEIVE] Suppressed Flutter incoming; Native Telecom owns call_id=$messageCallId');
       return;
     }
 
@@ -397,7 +380,6 @@ class RtcCallManager {
     if (id.isEmpty) return;
 
     await session.markCallEnded(id);
-    await session.clearPendingIncomingCall(id);
 
     if (reason == 'cancelled') {
       onRemoteCallCancelled?.call(id);
@@ -413,113 +395,6 @@ class RtcCallManager {
 
   bool _isCurrentCall(String? callId) {
     return callId != null && callId.isNotEmpty && callId == currentCallId;
-  }
-
-  /// Hydrates the same call identity when FCM delivered the invite before the
-  /// WebSocket isolate was alive. This keeps ringtone cancellation and accept
-  /// on the single manager lifecycle.
-  Future<void> prepareIncomingCall({
-    required String callId,
-    required String callerId,
-  }) async {
-    if (callId.trim().isEmpty || callerId.trim().isEmpty) return;
-    if (currentCallId != null && currentCallId != callId) return;
-    if (!CallCoordinator.instance.owns(callId)) {
-      if (CallCoordinator.instance.beginIncoming(callId) !=
-          CallCommandResult.accepted) return;
-    }
-    currentCallId = callId;
-    remoteUserId = callerId;
-    caller = false;
-    inCall = false;
-    state = CallState.incoming;
-    await session.markCallActive(callId);
-  }
-
-  Future<void> acceptCall({required String callerId, String? callId, bool userInitiated = false}) {
-    // Both custom UI and native Telecom callbacks pass through the
-    // coordinator queue. Exactly one call_id may win beginAccept().
-    return CallCoordinator.instance.serialize(
-      () => _acceptCall(callerId: callerId, callId: callId, userInitiated: userInitiated),
-    );
-  }
-
-  Future<void> _acceptCall({required String callerId, String? callId, required bool userInitiated}) async {
-    final acceptedCallId = callId ?? currentCallId;
-    if (acceptedCallId == null ||
-        await session.isCallEnded(acceptedCallId) ||
-        (currentCallId != null && currentCallId != acceptedCallId)) {
-      return;
-    }
-    if (state == CallState.accepted ||
-        state == CallState.connecting ||
-        state == CallState.connected) {
-      return;
-    }
-    if (!CallCoordinator.instance.owns(acceptedCallId) ||
-        CallCoordinator.instance.beginAccept(acceptedCallId) !=
-            CallCommandResult.accepted) {
-      return;
-    }
-
-    print('[CN CALL][CALL ANSWER RECEIVED] call_id=$acceptedCallId');
-    await _stopRinging();
-    remoteUserId = callerId;
-    currentCallId = callId ?? currentCallId;
-    await session.markCallActive(currentCallId!);
-    state = CallState.accepted;
-    caller = false;
-    inCall = false;
-    _pendingIceCandidates.clear();
-
-    try {
-      // A cold Telecom action has to restore and await the same signalling
-      // socket used by outgoing calls. Never silently drop call_accept.
-      await session.ensureSocketReady();
-      if (!_isCurrentCall(acceptedCallId)) return;
-
-      // Re-check terminal state after socket wait; remote cancellation
-      // may have arrived during the wait.
-      if (await session.isCallEnded(acceptedCallId)) {
-        print('[CN CALL][ACCEPT] Call already ended remotely, aborting accept call_id=$acceptedCallId');
-        return;
-      }
-
-      // Phase 5 (crossover race): ownership re-check IMMEDIATELY before
-      // call_accept. FCM may have reached the device first and become the
-      // native WS owner (reserved before addNewIncomingCall), even while the
-      // Flutter socket is still open or the session was just restored. If
-      // native owns signaling for this call now, Flutter must STOP: it sends
-      // no call_accept and never tries to seize ownership back — the accept is
-      // left to the single native path (Telecom answer). This is a live read,
-      // not the connect()-time guard; a native answer already ran nevertheless
-      // clears any stale Flutter accept attempt.
-      if (!await session.guardFlutterWsOwnership()) {
-        print('[CN CALL][ACCEPT] WS is native-owned; call_accept withheld call_id=$acceptedCallId');
-        await _cleanupCall(
-          reason: 'failed',
-          sendSignal: false,
-          forceDisconnect: true,
-        );
-        return;
-      }
-
-      print('[CN CALL][CALL SOCKET READY] call_id=$acceptedCallId');
-      await session.socket.sendGuaranteed({
-        'type': 'call_accept',
-        'call_id': acceptedCallId,
-        'target_id': callerId,
-      });
-      print('[CN CALL][CALL_ACCEPT SENT] call_id=$acceptedCallId');
-      state = CallState.negotiating;
-      CallCoordinator.instance.beginNegotiation(acceptedCallId);
-      _startNegotiationTimeout(acceptedCallId);
-      _startConnectionTimeout(acceptedCallId);
-      await _connectLiveKit(currentCallId!);
-    } catch (e) {
-      print('[CN CALL][LIVEKIT CONNECT FAILED] call_id=$acceptedCallId error=$e');
-      await _failTelecomAndCleanup(acceptedCallId, reason: 'failed');
-    }
   }
 
   Future<void> _handleAccepted() async {
@@ -539,35 +414,6 @@ class RtcCallManager {
       print('[CN CALL][LIVEKIT CONNECT FAILED] call_id=$acceptedCallId error=$e');
       await _failTelecomAndCleanup(acceptedCallId, reason: 'failed');
     }
-  }
-
-  Future<void> rejectCall({required String callerId, String? callId}) async {
-    final rejectedCallId = callId?.trim() ?? '';
-    final rejectedCallerId = callerId.trim();
-    if (rejectedCallId.isEmpty ||
-        rejectedCallerId.isEmpty ||
-        await session.isCallEnded(rejectedCallId)) {
-      return;
-    }
-    if (currentCallId != null && currentCallId != rejectedCallId) return;
-    if (remoteUserId != null && remoteUserId != rejectedCallerId) return;
-
-    // A Telecom action can launch Flutter after the process was terminated.
-    // Rehydrate only this exact call so cleanup sends its reject to the right
-    // peer; a stale action can never clean up a newer call.
-    currentCallId ??= rejectedCallId;
-    remoteUserId ??= rejectedCallerId;
-    caller = false;
-    inCall = false;
-    state = CallState.incoming;
-    await session.markCallActive(rejectedCallId);
-
-    await _cleanupCall(
-      reason: 'rejected',
-      sendSignal: true,
-      signalType: 'call_reject',
-      forceDisconnect: false,
-    );
   }
 
   Future<void> hangup({bool sendSignal = true}) async {
@@ -686,7 +532,6 @@ class RtcCallManager {
       await livekit.disconnect();
 
       await session.markCallEnded(callId);
-      await session.clearPendingIncomingCall(callId);
       if (callId != null) CallCoordinator.instance.markEnded(callId);
 
       _pendingIceCandidates.clear();
@@ -720,17 +565,6 @@ class RtcCallManager {
     await livekit.mute(value);
   }
 
-  Future<void> startIncomingRingtone() async {
-    try {
-      await const MethodChannel('cn_call/call').invokeMethod(
-        'playDefaultRingtone',
-        <String, dynamic>{'earpiece': false},
-      );
-      _incomingRingtonePlaying = true;
-    } catch (error) {
-      print('[CN CALL][RINGTONE] start failed: $error');
-    }
-  }
 
   Future<void> setSpeaker(bool value) {
     return livekit.setSpeaker(value);

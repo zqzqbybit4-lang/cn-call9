@@ -17,11 +17,6 @@ class CallSession {
     socket.onCheckOwnership = guardFlutterWsOwnership;
   }
 
-  final StreamController<Map<String, dynamic>> _incomingCalls =
-      StreamController<Map<String, dynamic>>.broadcast();
-
-  Stream<Map<String, dynamic>> get incomingCalls => _incomingCalls.stream;
-
   StreamSubscription<Map<String, dynamic>>? _messageSubscription;
 
   String? userId;
@@ -252,81 +247,6 @@ class CallSession {
     if (!socket.connected) throw StateError('CN CALL WebSocket is not ready');
   }
 
-  Future<void> incomingCallFromNotification(Map<String, dynamic> data) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final callId = data['call_id']?.toString().trim() ?? '';
-      if (callId.isEmpty || await isCallEnded(callId)) return;
-
-      await prefs.setString('pending_incoming_call', jsonEncode(data));
-
-      // FCM data messages can be delivered after a cancellation message.  Do
-      // not re-publish a call that was cancelled while this write was pending.
-      if (await isCallEnded(callId)) {
-        await clearPendingIncomingCall(callId);
-        return;
-      }
-
-      _incomingCalls.add(data);
-    } catch (e) {
-      print('SAVE INCOMING CALL ERROR: $e');
-    }
-  }
-
-  Future<Map<String, dynamic>?> takePendingIncomingCall() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-
-      final pending = prefs.getString('pending_incoming_call');
-
-      if (pending == null || pending.isEmpty) {
-        return null;
-      }
-
-      await prefs.remove('pending_incoming_call');
-
-      final data = jsonDecode(pending);
-
-      if (data is Map) {
-        final call = Map<String, dynamic>.from(data);
-        final callId = call['call_id']?.toString().trim() ?? '';
-        final callerId = (call['caller_id']?.toString().trim().isNotEmpty == true)
-            ? call['caller_id'].toString().trim()
-            : call['from_id']?.toString().trim() ?? '';
-        if (callId.isEmpty ||
-            callerId.isEmpty ||
-            await isCallEnded(callId) ||
-            await hasActiveCall()) {
-          return null;
-        }
-        call['call_id'] = callId;
-        call['caller_id'] = callerId;
-        return call;
-      }
-    } catch (e) {
-      print('TAKE PENDING CALL ERROR: $e');
-    }
-
-    return null;
-  }
-
-  Future<void> clearPendingIncomingCall(String? callId) async {
-    if (callId == null || callId.isEmpty) return;
-
-    final prefs = await SharedPreferences.getInstance();
-    final pending = prefs.getString('pending_incoming_call');
-    if (pending == null || pending.isEmpty) return;
-
-    try {
-      final data = jsonDecode(pending);
-      final pendingId = data is Map ? data['call_id']?.toString() : null;
-      if (pendingId == callId) {
-        await prefs.remove('pending_incoming_call');
-      }
-    } catch (_) {
-      await prefs.remove('pending_incoming_call');
-    }
-  }
 
   Future<void> logout() async {
     await _messageSubscription?.cancel();
