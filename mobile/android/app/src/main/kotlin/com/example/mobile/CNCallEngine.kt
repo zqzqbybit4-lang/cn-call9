@@ -927,7 +927,7 @@ object CNCallEngine {
                         payload["target_online"]
                             ?.trim()
                             ?.equals("true", ignoreCase = true)
-                            == true
+                            ?: false
 
                     var isStale = false
                     synchronized(lock) {
