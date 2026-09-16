@@ -27,15 +27,6 @@ class CNCallConnection(
     private var ringbackPlayer: MediaPlayer? = null
     private var ringbackGeneration = 0L
     internal val engineCallbacks = object : CNCallEngine.Callbacks {
-        override fun onCallStarted(targetOnline: Boolean) {
-            // Telecom lifecycle remains unchanged here.
-            // This callback is informational for the connection layer.
-            println(
-                "[CN CALL][TELECOM] call started call_id=$callId " +
-                    "target_online=$targetOnline",
-            )
-        }
-
         override fun onMediaReady() {
             if (terminal || active) return
 
