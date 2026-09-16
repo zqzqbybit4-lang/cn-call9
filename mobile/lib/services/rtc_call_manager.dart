@@ -322,6 +322,11 @@ class RtcCallManager {
           currentCallId != null) {
         return;
       }
+      if (await session.isNativeWsOwner()) {
+        print(
+            '[CN CALL][CALL RECEIVE] Suppressed Flutter incoming; Native Telecom owns call_id=$messageCallId');
+        return;
+      }
       if (CallCoordinator.instance.beginIncoming(messageCallId) !=
           CallCommandResult.accepted) {
         return;

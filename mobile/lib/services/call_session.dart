@@ -133,6 +133,13 @@ class CallSession {
   /// Returns true only when no other owner (currently "native", set by a
   /// native-managed call) holds the socket. This is the single place Flutter
   /// writes the owner marker.
+  /// Pure read predicate. Returns true only when Native Android Telecom currently
+  /// holds signaling ownership ("native"). Does NOT write or mutate state.
+  Future<bool> isNativeWsOwner() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_wsOwnerKey) == 'native';
+  }
+
   Future<bool> guardFlutterWsOwnership() async {
     final prefs = await SharedPreferences.getInstance();
     final current = prefs.getString(_wsOwnerKey) ?? '';
